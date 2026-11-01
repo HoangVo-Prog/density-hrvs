@@ -78,6 +78,7 @@ class RunState:
     feature_extractor: FeatureExtractor
     detector: Detector
     context: NodeContext = field(default_factory=NodeContext)
+    seed_children: list[ChildRegion] | None = None
     started_at: float = field(default_factory=time.perf_counter)
     score_cache: dict[str, VerifierScore] = field(default_factory=dict)
     detection_cache: dict[int, list[SAM3Detection]] = field(default_factory=dict)

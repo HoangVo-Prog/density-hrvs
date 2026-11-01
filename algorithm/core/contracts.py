@@ -122,6 +122,15 @@ class CandidatePrompt(TypedDict):
     bbox: BoundingBox  # Box in the supplied region image's coordinates.
 
 
+class RegionAssessment(TypedDict):
+    """Whole-region verifier output: ranking plus per-candidate ratings."""
+
+    ranking: list[int]  # One-based candidate indices, best first.
+    best_index: int  # Equal to ranking[0].
+    ambiguous: bool  # Tied/weak/inconsistent top candidates need detail fallback.
+    ratings: dict[int, MatchRating]  # Every candidate index exactly once.
+
+
 class RankedRegion(SAM3Region):
     """A proposal ranked by per-candidate verification; score is its fused score.
 
@@ -209,9 +218,19 @@ class SearchConfig(TypedDict):
     verification_mode: NotRequired[
         Literal["region", "candidate"]
     ]  # Verify the whole cluster together or one evidence sheet per candidate.
+    discovery_mode: NotRequired[
+        Literal["off", "sam3_qwen"]
+    ]  # Seed the tree from tiled SAM3 candidates reranked by Qwen.
+    discovery_tiles: NotRequired[int]  # Grid side for the initial SAM3 scan.
+    discovery_candidates: NotRequired[int]  # SAM3 candidates reranked by Qwen.
+    discovery_seeds: NotRequired[int]  # Top reranked candidates added as tree seeds.
+    discovery_overlap: NotRequired[float]  # Fractional tile overlap for discovery.
     region_candidate_limit: NotRequired[
         int
     ]  # Top SAM3 boxes drawn for whole-region verification; 0 disables.
+    region_fallback_limit: NotRequired[
+        int
+    ]  # Ambiguous regions re-check this many candidates with detail sheets.
     candidate_check_limit: NotRequired[
         int
     ]  # Maximum candidate evidence sheets checked per region; 0 disables.

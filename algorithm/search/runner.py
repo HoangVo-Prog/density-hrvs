@@ -20,6 +20,7 @@ from ..core.diagnostics import save_tree, stage_index
 from ..core.events import EventSink, ignore_event
 from ..models.qwen_scoring import LocalScorer
 from ..reporting.artifacts import save_search_result
+from .discovery import discover_seed_regions
 from .pipeline import estimate_node, evaluate_node, split_node
 from .runtime import RunState, SearchRequest
 from .setup import prepare_run
@@ -86,6 +87,7 @@ def run_visual_search(
             on_event=on_event,
         )
     )
+    state.seed_children = discover_seed_regions(state)
     observer = (
         (lambda nodes, trace: save_tree(state.artifacts / "tree", nodes, trace))
         if state.artifacts is not None

@@ -104,6 +104,22 @@ def main() -> None:
         help="Top SAM3 boxes drawn for whole-region verification; 0 disables",
     )
     parser.add_argument(
+        "--region-fallback-limit",
+        type=int,
+        default=3,
+        help="Ambiguous regions re-check this many candidates with detail sheets",
+    )
+    parser.add_argument(
+        "--discovery-mode",
+        choices=("off", "sam3_qwen"),
+        default="off",
+        help="Seed the tree from tiled SAM3 candidates reranked by Qwen",
+    )
+    parser.add_argument("--discovery-tiles", type=int, default=3)
+    parser.add_argument("--discovery-candidates", type=int, default=5)
+    parser.add_argument("--discovery-seeds", type=int, default=3)
+    parser.add_argument("--discovery-overlap", type=float, default=0.10)
+    parser.add_argument(
         "--compact-existing",
         action="store_true",
         help="Resize existing display copies without running inference",
@@ -148,6 +164,12 @@ def main() -> None:
     settings["max_local_scores"] = args.max_local_scores
     settings["verification_mode"] = args.verification_mode
     settings["region_candidate_limit"] = args.region_candidate_limit
+    settings["region_fallback_limit"] = args.region_fallback_limit
+    settings["discovery_mode"] = args.discovery_mode
+    settings["discovery_tiles"] = args.discovery_tiles
+    settings["discovery_candidates"] = args.discovery_candidates
+    settings["discovery_seeds"] = args.discovery_seeds
+    settings["discovery_overlap"] = args.discovery_overlap
     settings_path = args.output_dir / "config.json"
     serialized = json.loads(json.dumps(settings))
     if settings_path.exists() and json.loads(settings_path.read_text()) != serialized:

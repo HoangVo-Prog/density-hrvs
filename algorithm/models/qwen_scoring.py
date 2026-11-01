@@ -8,14 +8,14 @@ from PIL import Image
 import torch
 from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 
-from ..core.contracts import CandidatePrompt, VerifierScore
+from ..core.contracts import CandidatePrompt, RegionAssessment, VerifierScore
 from ..core.errors import InvalidScoreResponse
 from .scoring import (
     CONTEXT_INSTRUCTIONS,
     SCORING_PROMPT,
     ScoringView,
     _ignore_request,
-    parse_candidate_assessments,
+    parse_region_assessment,
     parse_verifier_score,
 )
 
@@ -54,12 +54,15 @@ Judge visible evidence only. All required attributes and spatial relations must 
 Do not choose a candidate only because its SAM3 confidence is high.
 Use the surrounding region to check relations and nearby reference objects.
 If required evidence is too small or obscured, mark that candidate Uncertain.
+Rank the candidates explicitly. Do not give identical scores unless the boxes are truly indistinguishable.
 
 Candidates:
 {candidates}
 
-Return ONLY one JSON object with every candidate index exactly once:
-{{"candidates":[{{"index":1,"answer":"Yes","score":92,"reason":"..."}}]}}
+Return ONLY one JSON object:
+{{"ranking":[3,1,5,2,4],"best_index":3,"candidates":[{{"index":1,"answer":"Yes","score":92,"reason":"..."}}]}}
+ranking must list every candidate index exactly once, best first.
+best_index must equal ranking[0].
 answer is exactly "Yes", "No", or "Uncertain". score is a match rating from 0 to 100.
 reason is a short visual explanation as a JSON string.
 
@@ -200,8 +203,8 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
             + json.dumps(query)
         )
         replies: list[str] = []
+        on_request()
         for attempt in range(2):
-            on_request()
             text = _generate_image_text(image, prompt, 256)
             replies.append(text)
             try:
@@ -227,37 +230,40 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
         candidates: list[CandidatePrompt],
         *,
         on_request: Callable[[], None] = _ignore_request,
-    ) -> dict[int, VerifierScore]:
-        """Assess the numbered SAM3 boxes together on the whole cluster image."""
+    ) -> RegionAssessment:
+        """Assess and rank the numbered SAM3 boxes on the whole cluster image."""
         prompt = REGION_CANDIDATES_PROMPT.format(
             candidates=json.dumps(candidates, indent=2),
             query=json.dumps(query),
         )
         expected = [candidate["index"] for candidate in candidates]
         replies: list[str] = []
+        on_request()
         for attempt in range(2):
-            on_request()
             text = _generate_image_text(image, prompt, 512)
             replies.append(text)
             try:
-                ratings = parse_candidate_assessments(text, expected)
+                assessment = parse_region_assessment(text, expected)
                 return {
-                    index: {
-                        **rating,
-                        "model_id": QWEN_MODEL,
-                        "raw_response": text,
-                        "prompt": prompt,
-                        "input_size": image.size,
-                        "model_revision": QWEN_REVISION,
-                    }
-                    for index, rating in ratings.items()
+                    "ranking": assessment["ranking"],
+                    "best_index": assessment["best_index"],
+                    "ambiguous": assessment["ambiguous"],
+                    "ratings": {
+                        index: {
+                            **rating,
+                            "model_id": QWEN_MODEL,
+                            "raw_response": text,
+                            "prompt": prompt,
+                            "input_size": image.size,
+                            "model_revision": QWEN_REVISION,
+                        }
+                        for index, rating in assessment["ratings"].items()
+                    },
                 }
             except ValueError:
                 if attempt:
                     raise InvalidScoreResponse(replies) from None
-                prompt += (
-                    "\nReturn only valid JSON with every candidate index exactly once."
-                )
+                prompt += "\nReturn only valid JSON with a full ranking and every candidate index exactly once."
         raise RuntimeError("Local Qwen candidate scoring failed")
 
     setattr(score, "rewrite", rewrite)
