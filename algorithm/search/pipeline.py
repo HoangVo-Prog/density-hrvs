@@ -18,6 +18,7 @@ from ..core.contracts import (
     VerifierScore,
 )
 from ..core.diagnostics import stage_index
+from ..core.geometry import box_iou
 from ..core.imaging import to_pil_rgb
 from ..reporting.artifacts import save_node_detections, save_node_input
 from .candidates import verify_candidates, verify_region_candidates
@@ -33,10 +34,10 @@ from .runtime import RunState
 
 
 def split_node(state: RunState, node: SearchNode) -> list[ChildRegion]:
-    """Partition a node once and cache the resulting child regions."""
+    """Partition a node once, prepending discovered seeds at the root."""
     if node["node_id"] not in state.split_cache:
         tick = time.perf_counter()
-        state.split_cache[node["node_id"]] = semantic_children(
+        semantic = semantic_children(
             state.rgb,
             node,
             state.settings,
@@ -44,6 +45,19 @@ def split_node(state: RunState, node: SearchNode) -> list[ChildRegion]:
             state.node_folder(node["node_id"]),
             state.on_event,
         )
+        if node["node_id"] == 0 and state.seed_children:
+            children = list(state.seed_children)
+            children.extend(
+                child
+                for child in semantic
+                if all(
+                    box_iou(child["bbox"], seed["bbox"]) <= 0.8
+                    for seed in state.seed_children
+                )
+            )
+            state.split_cache[node["node_id"]] = children
+        else:
+            state.split_cache[node["node_id"]] = semantic
         state.record_cost("split", time.perf_counter() - tick)
     return state.split_cache[node["node_id"]]
 

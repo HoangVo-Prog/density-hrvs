@@ -4,7 +4,7 @@ import json
 import math
 from typing import Literal, cast
 
-from ..core.contracts import MatchAnswer, MatchRating
+from ..core.contracts import MatchAnswer, MatchRating, RegionAssessment
 
 SCORING_PROMPT = """Assess how well this image crop matches the search description.
 Judge visible evidence only. Black areas are masked-out background, not evidence.
@@ -39,6 +39,8 @@ hidden details; use Uncertain when required evidence is insufficient.
 """
 
 ScoringView = Literal["region", "context_detail"]
+
+REGION_TIE_MARGIN = 0.05
 
 
 def _ignore_request() -> None:
@@ -120,3 +122,82 @@ def parse_candidate_assessments(
     if missing:
         raise ValueError(f"Verifier omitted candidate indices: {sorted(missing)}.")
     return assessments
+
+
+def parse_region_assessment(
+    content: str,
+    expected_indices: list[int],
+    tie_margin: float = REGION_TIE_MARGIN,
+) -> RegionAssessment:
+    """Validate a whole-region ranking, per-candidate ratings, and ambiguity."""
+    payload = _json_payload(content)
+    if not isinstance(payload, dict):
+        raise ValueError("Verifier must return one region-assessment object.")
+    expected = set(expected_indices)
+    if not expected:
+        return {
+            "ranking": [],
+            "best_index": 0,
+            "ambiguous": True,
+            "ratings": {},
+        }
+
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list):
+        raise ValueError("Verifier must return a candidates list.")
+    ratings: dict[int, MatchRating] = {}
+    for item in candidates:
+        if not isinstance(item, dict):
+            raise ValueError("Each candidate assessment must be a JSON object.")
+        index = item.get("index")
+        if isinstance(index, str) and index.strip().isdigit():
+            index = int(index)
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise ValueError("Each candidate assessment needs an integer index.")
+        if index not in expected:
+            raise ValueError(
+                f"Verifier returned an unexpected candidate index: {index}."
+            )
+        if index in ratings:
+            raise ValueError(f"Verifier repeated candidate index: {index}.")
+        ratings[index] = parse_match_rating(item)
+    missing = expected - set(ratings)
+    if missing:
+        raise ValueError(f"Verifier omitted candidate indices: {sorted(missing)}.")
+
+    ranking_raw = payload.get("ranking")
+    if not isinstance(ranking_raw, list):
+        raise ValueError("Verifier must return a ranking list.")
+    ranking: list[int] = []
+    for value in ranking_raw:
+        if isinstance(value, str) and value.strip().isdigit():
+            value = int(value)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("Ranking entries must be integer indices.")
+        if value not in expected:
+            raise ValueError(f"Ranking contains an unexpected index: {value}.")
+        ranking.append(value)
+    if len(ranking) != len(expected) or set(ranking) != expected:
+        raise ValueError("Ranking must contain each candidate index exactly once.")
+    best = payload.get("best_index", ranking[0])
+    if isinstance(best, str) and best.strip().isdigit():
+        best = int(best)
+    if isinstance(best, bool) or not isinstance(best, int) or best not in expected:
+        raise ValueError("best_index must be one of the candidate indices.")
+    if best != ranking[0]:
+        raise ValueError("best_index must equal ranking[0].")
+
+    top = ratings[ranking[0]]
+    second = ratings[ranking[1]] if len(ranking) > 1 else None
+    ambiguous = top["answer"] != "Yes" or top["score"] < 0.5
+    if second is not None:
+        if top["score"] - second["score"] < tie_margin:
+            ambiguous = True
+        if top["score"] + tie_margin < second["score"]:
+            ambiguous = True
+    return {
+        "ranking": ranking,
+        "best_index": best,
+        "ambiguous": ambiguous,
+        "ratings": ratings,
+    }

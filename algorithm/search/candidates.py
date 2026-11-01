@@ -24,6 +24,7 @@ from ..models.evidence import (
     build_region_candidate_sheet,
     evidence_info,
 )
+from ..models.scoring import REGION_TIE_MARGIN
 from .evaluation import candidate_query_text, score_crop
 from .region_scoring import candidate_score
 from .runtime import RunState
@@ -226,6 +227,24 @@ def verify_candidates(
     return checks
 
 
+def verify_selected_candidates(
+    state: RunState,
+    node: SearchNode,
+    distinct: list[SAM3Detection],
+    indices: list[int],
+    folder: Path | None,
+) -> list[CandidateCheck]:
+    """Verify selected detections with per-candidate context/detail sheets."""
+    checks: list[CandidateCheck] = []
+    for index in sorted(set(indices)):
+        if not 0 <= index < len(distinct):
+            continue
+        check = verify_candidate(state, node, distinct[index], index + 1, folder)
+        if check is not None:
+            checks.append(check)
+    return checks
+
+
 def verify_region_candidates(
     state: RunState,
     node: SearchNode,
@@ -233,7 +252,7 @@ def verify_region_candidates(
     pixels: NDArray,
     folder: Path | None,
 ) -> list[CandidateCheck] | None:
-    """Verify the top SAM3 boxes together on the whole cluster image.
+    """Rank the top SAM3 boxes on the whole cluster, then detail-check ambiguity.
 
     Returns None when the local scorer does not implement ``score_candidates``,
     so the caller can fall back to per-candidate context/detail evidence sheets.
@@ -247,6 +266,7 @@ def verify_region_candidates(
         return []
 
     subset = distinct[:limit]
+    fallback_limit = state.settings.get("region_fallback_limit", 3)
     label = state.settings["sam_prompt"] or state.query
     candidates: list[CandidatePrompt] = [
         {
@@ -264,10 +284,12 @@ def verify_region_candidates(
     )
     if folder is not None:
         sheet.save(folder / "region_candidates.png")
-        (folder / "region_candidates.json").write_text(json.dumps(candidates, indent=2))
+        (folder / "region_candidates.json").write_text(
+            json.dumps(candidates, indent=2)
+        )
     state.on_event(
         "qwen_started",
-        f"N{node['node_id']}: verify {len(candidates)} SAM3 boxes on the whole cluster region.",
+        f"N{node['node_id']}: rank {len(candidates)} SAM3 boxes on the whole cluster region.",
         {
             "node_id": node["node_id"],
             "candidate_indices": [candidate["index"] for candidate in candidates],
@@ -277,7 +299,7 @@ def verify_region_candidates(
     )
     tick = time.perf_counter()
     try:
-        ratings = verifier(
+        assessment = verifier(
             sheet,
             state.query,
             candidates,
@@ -296,21 +318,32 @@ def verify_region_candidates(
                 )
             )
             stage_index(folder)
-        raise
+        fallback_indices = list(range(min(fallback_limit, len(distinct))))
+        fallback_checks = verify_selected_candidates(
+            state, node, distinct, fallback_indices, folder
+        )
+        state.usage["candidate_checks"] = state.usage.get(
+            "candidate_checks", 0
+        ) + len(fallback_checks)
+        state.on_event(
+            "qwen_completed",
+            f"N{node['node_id']}: invalid region JSON; detail-checked {len(fallback_checks)} candidates instead.",
+            {
+                "node_id": node["node_id"],
+                "fallback": "invalid_json",
+                "candidate_indices": [index + 1 for index in fallback_indices],
+                "raw_responses": exc.responses,
+                "usage": state.usage.copy(),
+            },
+        )
+        return fallback_checks
     finally:
         state.record_cost("score", time.perf_counter() - tick)
 
-    if folder is not None:
-        (folder / "region_candidate_scores.json").write_text(
-            json.dumps(
-                {str(index): rating for index, rating in ratings.items()},
-                indent=2,
-            )
-        )
-    checks: list[CandidateCheck] = []
+    region_checks: dict[int, CandidateCheck] = {}
     for index, detection in enumerate(subset):
         rank = index + 1
-        rating = ratings.get(rank)
+        rating = assessment["ratings"].get(rank)
         if rating is None:
             continue
         global_box = clamp_global_box(
@@ -325,27 +358,55 @@ def verify_region_candidates(
             detection["sam3_score"],
             state.settings,
         )
-        checks.append(
-            {
-                "rank": rank,
-                "detection_index": index,
-                "local_bbox": detection["bbox"],
-                "bbox": global_box,
-                "sam3_score": detection["sam3_score"],
-                "checked": True,
-                "candidate_score": fused,
-                "qwen": rating,
-            }
+        region_checks[index] = {
+            "rank": rank,
+            "detection_index": index,
+            "local_bbox": detection["bbox"],
+            "bbox": global_box,
+            "sam3_score": detection["sam3_score"],
+            "checked": True,
+            "candidate_score": fused,
+            "qwen": rating,
+        }
+
+    if folder is not None:
+        (folder / "region_candidate_scores.json").write_text(
+            json.dumps(assessment, indent=2)
         )
+
+    fallback_indices: list[int] = []
+    if assessment["ambiguous"] and fallback_limit > 0:
+        best = assessment["ratings"][assessment["best_index"]]
+        if best["answer"] == "Yes":
+            selected = [
+                index
+                for index in assessment["ranking"]
+                if assessment["ratings"][index]["score"]
+                >= best["score"] - REGION_TIE_MARGIN
+            ]
+            if len(selected) < 2:
+                selected = assessment["ranking"][:fallback_limit]
+        else:
+            selected = assessment["ranking"][:fallback_limit]
+        fallback_indices = [index - 1 for index in selected[: max(limit, 1)]]
+
+    merged = dict(region_checks)
+    if fallback_indices:
+        for check in verify_selected_candidates(
+            state, node, distinct, fallback_indices, folder
+        ):
+            merged[check["detection_index"]] = check
+    checks = [merged[index] for index in sorted(merged)]
     state.usage["candidate_checks"] = state.usage.get("candidate_checks", 0) + len(
         checks
     )
     state.on_event(
         "qwen_completed",
-        f"N{node['node_id']}: whole-region verification checked {len(checks)} boxes.",
+        f"N{node['node_id']}: region ranking checked {len(checks)} boxes; fallback {len(fallback_indices)}.",
         {
             "node_id": node["node_id"],
-            "assessments": {str(index): rating for index, rating in ratings.items()},
+            "assessment": assessment,
+            "fallback_indices": [index + 1 for index in fallback_indices],
             "usage": state.usage.copy(),
         },
     )

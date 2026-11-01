@@ -122,6 +122,15 @@ class CandidatePrompt(TypedDict):
     bbox: BoundingBox  # Box in the supplied region image's coordinates.
 
 
+class RegionAssessment(TypedDict):
+    """Whole-region verifier output: ranking plus per-candidate ratings."""
+
+    ranking: list[int]  # One-based candidate indices, best first.
+    best_index: int  # Equal to ranking[0].
+    ambiguous: bool  # Tied/weak/inconsistent top candidates need detail fallback.
+    ratings: dict[int, MatchRating]  # Every candidate index exactly once.
+
+
 class RankedRegion(SAM3Region):
     """A proposal ranked by per-candidate verification; score is its fused score.
 
@@ -209,9 +218,19 @@ class SearchConfig(TypedDict):
     verification_mode: NotRequired[
         Literal["region", "candidate"]
     ]  # Verify the whole cluster together or one evidence sheet per candidate.
+    discovery_mode: NotRequired[
+        Literal["off", "sam3_qwen"]
+    ]  # Seed the tree from tiled SAM3 candidates reranked by Qwen.
+    discovery_tiles: NotRequired[int]  # Grid side for the initial SAM3 scan.
+    discovery_candidates: NotRequired[int]  # SAM3 candidates reranked by Qwen.
+    discovery_seeds: NotRequired[int]  # Top reranked candidates added as tree seeds.
+    discovery_overlap: NotRequired[float]  # Fractional tile overlap for discovery.
     region_candidate_limit: NotRequired[
         int
     ]  # Top SAM3 boxes drawn for whole-region verification; 0 disables.
+    region_fallback_limit: NotRequired[
+        int
+    ]  # Ambiguous regions re-check this many candidates with detail sheets.
     candidate_check_limit: NotRequired[
         int
     ]  # Maximum candidate evidence sheets checked per region; 0 disables.
@@ -354,6 +373,22 @@ class SearchUsage(TypedDict):
     ]  # Regions with no SAM3 candidates whose verifier call was skipped.
 
 
+class FinalAnswer(TypedDict):
+    """Text answer generated from the original question and the top-ranked region."""
+
+    question: str  # Original user/dataset question, not the rewritten search query.
+    answer: str  # Short natural-language answer grounded in the selected crop.
+    bbox: BoundingBox  # Top-1 proposal in original-image coordinates.
+    crop_bbox: BoundingBox  # Padded context crop actually sent to the answerer.
+    proposal_score: float  # Fused score of the top-1 proposal.
+    model_id: str  # Actual answerer model; authoritative provenance.
+    raw_response: str  # Exact model text before whitespace cleanup.
+    prompt: str  # Exact answerer prompt.
+    input_size: tuple[int, int]  # PIL crop dimensions before processor resizing.
+    model_revision: NotRequired[str]
+    image_path: NotRequired[str]  # Saved answer crop, relative to results.json.
+
+
 class SearchResult(TypedDict):
     """Search evidence and trace; arrays are excluded from the JSON summary."""
 
@@ -369,6 +404,7 @@ class SearchResult(TypedDict):
     ]
     error: str  # Empty on successful or budget-limited completion.
     elapsed_seconds: float
+    final_answer: NotRequired[FinalAnswer]  # Text answer for the top-ranked region.
     warnings: NotRequired[
         list[str]
     ]  # Recoverable region failures; query may still finish successfully.
@@ -438,4 +474,5 @@ class SearchReport(TypedDict):
     trace: list[SearchStep]
     clusters: list[ClusterReport]
     proposals: list[ProposalReport]
+    final_answer: NotRequired[FinalAnswer]  # Question + top-1 region answer.
     warnings: NotRequired[list[str]]

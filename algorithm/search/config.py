@@ -24,8 +24,14 @@ def default_search_config() -> SearchConfig:
         "sam_prompt": "",
         "rewrite_sam_prompt": True,
         "sam3_first": True,
-        "verification_mode": "region",
+        "verification_mode": "candidate",
+        "discovery_mode": "off",
+        "discovery_tiles": 3,
+        "discovery_candidates": 5,
+        "discovery_seeds": 3,
+        "discovery_overlap": 0.10,
         "region_candidate_limit": 5,
+        "region_fallback_limit": 3,
         "candidate_check_limit": 2,
         "candidate_accept_score": 0.5,
         "candidate_qwen_weight": 0.7,
@@ -62,6 +68,8 @@ def default_search_config() -> SearchConfig:
         "region_diversity_weight": 0.05,
         "region_box_count_cap": 5,
         "region_nms_iou": 0.7,
+        "answer_question": True,
+        "answer_context_padding": 384,
     }
 
 
@@ -105,11 +113,32 @@ def _validate_candidate_settings(config: SearchConfig) -> None:
     region_limit = config.get("region_candidate_limit", 5)
     if type(region_limit) is not int or region_limit < 0:
         raise ValueError("region_candidate_limit must be a nonnegative integer")
+    fallback_limit = config.get("region_fallback_limit", 3)
+    if type(fallback_limit) is not int or fallback_limit < 0:
+        raise ValueError("region_fallback_limit must be a nonnegative integer")
+    if config.get("discovery_mode", "off") not in {"off", "sam3_qwen"}:
+        raise ValueError("discovery_mode must be 'off' or 'sam3_qwen'")
+    for name, minimum in (
+        ("discovery_tiles", 1),
+        ("discovery_candidates", 0),
+        ("discovery_seeds", 0),
+    ):
+        value = config.get(name, 0)
+        if type(value) is not int or value < minimum:
+            raise ValueError(f"{name} must be an integer >= {minimum}")
+    overlap = config.get("discovery_overlap", 0.10)
+    if not math.isfinite(overlap) or not 0 <= overlap < 0.5:
+        raise ValueError("discovery_overlap must be in [0, 0.5)")
     accept_score = config.get("candidate_accept_score", 0.5)
     if not math.isfinite(accept_score) or not 0 <= accept_score <= 1:
         raise ValueError("candidate_accept_score must be in [0, 1]")
     if config.get("candidate_query_mode", "full") not in {"full", "target_phrase"}:
         raise ValueError("candidate_query_mode must be 'full' or 'target_phrase'")
+    if not isinstance(config.get("answer_question", True), bool):
+        raise ValueError("answer_question must be a boolean")
+    answer_padding = config.get("answer_context_padding", 384)
+    if type(answer_padding) is not int or answer_padding < 0:
+        raise ValueError("answer_context_padding must be a nonnegative integer")
 
 
 def _validate_budgets(config: SearchConfig) -> None:
