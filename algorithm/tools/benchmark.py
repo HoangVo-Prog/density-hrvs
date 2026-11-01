@@ -44,6 +44,7 @@ class Outcome(TypedDict):
     local_score_calls: int  # Local Qwen generations, separate from HTTP attempts.
     top1_iou: float  # Highest-ranked proposal overlap, evaluated after inference.
     best_iou: float  # Best overlap anywhere in the candidate list.
+    final_answer: NotRequired[str]  # Qwen text answer from the top-ranked region.
     warnings: NotRequired[
         list[str]
     ]  # Skipped malformed verifier regions, not hidden as zero scores.
@@ -120,6 +121,11 @@ def main() -> None:
     parser.add_argument("--discovery-seeds", type=int, default=3)
     parser.add_argument("--discovery-overlap", type=float, default=0.10)
     parser.add_argument(
+        "--no-final-answer",
+        action="store_true",
+        help="Skip the post-search Qwen answer from the top-ranked region",
+    )
+    parser.add_argument(
         "--compact-existing",
         action="store_true",
         help="Resize existing display copies without running inference",
@@ -170,6 +176,7 @@ def main() -> None:
     settings["discovery_candidates"] = args.discovery_candidates
     settings["discovery_seeds"] = args.discovery_seeds
     settings["discovery_overlap"] = args.discovery_overlap
+    settings["answer_question"] = not args.no_final_answer
     settings_path = args.output_dir / "config.json"
     serialized = json.loads(json.dumps(settings))
     if settings_path.exists() and json.loads(settings_path.read_text()) != serialized:
@@ -209,7 +216,7 @@ def main() -> None:
 
         return call
 
-    for prompt_method in ("rewrite", "resolve"):
+    for prompt_method in ("rewrite", "resolve", "answer"):
         method = getattr(qwen, prompt_method, None)
         if callable(method):
             setattr(score, prompt_method, guarded(method))
@@ -270,6 +277,7 @@ def main() -> None:
             result = run_visual_search(
                 image,
                 query,
+                question=question["question"],
                 config=config,
                 local_scorer=score,
                 detector=detect,
@@ -282,6 +290,7 @@ def main() -> None:
             outcome["api_calls"] = result["usage"]["api_calls"]
             outcome["cost_usd"] = result["usage"]["reported_cost_usd"]
             outcome["local_score_calls"] = result["usage"].get("local_score_calls", 0)
+            outcome["final_answer"] = result.get("final_answer", {}).get("answer", "")
             outcome["warnings"] = result.get("warnings", [])
             save_search_result(result, image, folder / "run")
             inspection = make_inspection(

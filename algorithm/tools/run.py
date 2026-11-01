@@ -182,6 +182,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--exploration-weight", type=float, default=1.4)
     parser.add_argument("--cost-weight", type=float, default=0.2)
     parser.add_argument(
+        "--no-final-answer",
+        action="store_true",
+        help="Skip the post-search Qwen answer from the top-ranked region",
+    )
+    parser.add_argument(
         "--no-ground-truth",
         action="store_true",
         help="Skip optional post-run ground-truth inspection for dataset question IDs",
@@ -266,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
             strategy=args.strategy,
             exploration_weight=args.exploration_weight,
             cost_weight=args.cost_weight,
+            answer_question=not args.no_final_answer,
         )
         validate_search_config(config)
         if args.cpu_threads < 1:
@@ -346,6 +352,10 @@ def main(argv: list[str] | None = None) -> int:
             "iteration_completed",
             "evaluation_failed",
             "search_finished",
+            "answer_started",
+            "answer_completed",
+            "answer_failed",
+            "answer_skipped",
         }:
             render_run_page(output, request, status)
 
@@ -363,6 +373,7 @@ def main(argv: list[str] | None = None) -> int:
         result = run_visual_search(
             np.asarray(image),
             query,
+            question=args.question,
             config=config,
             artifact_dir=output / "stages",
             progress=lambda message: None,

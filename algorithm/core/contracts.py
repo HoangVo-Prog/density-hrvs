@@ -373,6 +373,22 @@ class SearchUsage(TypedDict):
     ]  # Regions with no SAM3 candidates whose verifier call was skipped.
 
 
+class FinalAnswer(TypedDict):
+    """Text answer generated from the original question and the top-ranked region."""
+
+    question: str  # Original user/dataset question, not the rewritten search query.
+    answer: str  # Short natural-language answer grounded in the selected crop.
+    bbox: BoundingBox  # Top-1 proposal in original-image coordinates.
+    crop_bbox: BoundingBox  # Padded context crop actually sent to the answerer.
+    proposal_score: float  # Fused score of the top-1 proposal.
+    model_id: str  # Actual answerer model; authoritative provenance.
+    raw_response: str  # Exact model text before whitespace cleanup.
+    prompt: str  # Exact answerer prompt.
+    input_size: tuple[int, int]  # PIL crop dimensions before processor resizing.
+    model_revision: NotRequired[str]
+    image_path: NotRequired[str]  # Saved answer crop, relative to results.json.
+
+
 class SearchResult(TypedDict):
     """Search evidence and trace; arrays are excluded from the JSON summary."""
 
@@ -388,6 +404,7 @@ class SearchResult(TypedDict):
     ]
     error: str  # Empty on successful or budget-limited completion.
     elapsed_seconds: float
+    final_answer: NotRequired[FinalAnswer]  # Text answer for the top-ranked region.
     warnings: NotRequired[
         list[str]
     ]  # Recoverable region failures; query may still finish successfully.
@@ -457,4 +474,5 @@ class SearchReport(TypedDict):
     trace: list[SearchStep]
     clusters: list[ClusterReport]
     proposals: list[ProposalReport]
+    final_answer: NotRequired[FinalAnswer]  # Question + top-1 region answer.
     warnings: NotRequired[list[str]]

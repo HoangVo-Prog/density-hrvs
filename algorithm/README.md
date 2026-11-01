@@ -66,6 +66,10 @@ from algorithm_refactored.search.config import default_search_config
 - `discovery_mode="sam3_qwen"` optionally runs a tiled SAM3 scan before the tree,
   reranks the candidates with Qwen, and adds the best regions as root seeds while
   keeping the normal semantic/spatial children as a fallback.
+- The post-search answer stage crops a padded window around the top-ranked box
+  and asks Qwen the original question, writing `final_answer` (answer, bbox,
+  crop, prompt, raw response) into `results.json`; disable it with
+  `answer_question=False` or `--no-final-answer`.
 - `main.py` is a small compatibility facade; CLIs live under `tools/` and load
   model-heavy modules lazily.
 

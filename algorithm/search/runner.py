@@ -20,6 +20,7 @@ from ..core.diagnostics import save_tree, stage_index
 from ..core.events import EventSink, ignore_event
 from ..models.qwen_scoring import LocalScorer
 from ..reporting.artifacts import save_search_result
+from .answering import answer_top_region
 from .discovery import discover_seed_regions
 from .pipeline import estimate_node, evaluate_node, split_node
 from .runtime import RunState, SearchRequest
@@ -43,6 +44,7 @@ def run_visual_search(
     image: NDArray,
     query: str,
     *,
+    question: str | None = None,
     config: SearchConfig | None = None,
     scorer: Scorer | None = None,
     detector: Detector | None = None,
@@ -57,6 +59,7 @@ def run_visual_search(
     Args:
         image: Original uint8 RGB image, or float RGB in [0, 1].
         query: Complete target description, including all required attributes.
+        question: Original question for the final-answer stage; defaults to query.
         config: Editable default_search_config() controls; omitted uses defaults.
         scorer: Legacy custom scorer. Each invocation counts as one API unit;
             production scoring uses local_scorer and its separate compute ledger.
@@ -77,6 +80,7 @@ def run_visual_search(
         SearchRequest(
             image=image,
             query=query,
+            question=question,
             config=config,
             scorer=scorer,
             detector=detector,
@@ -106,6 +110,7 @@ def run_visual_search(
         on_event=state.on_event,
     )
     _attach_rankings(state, result)
+    _attach_final_answer(state, result)
     result["elapsed_seconds"] = time.perf_counter() - state.started_at
     _finalize_artifacts(state, result)
     state.on_event(
@@ -139,6 +144,45 @@ def _attach_rankings(state: RunState, result: SearchResult) -> None:
         state.observed_regions,
         key=lambda proposal: (proposal["score"], proposal["sam3_score"] or 0.0),
         reverse=True,
+    )
+
+
+def _attach_final_answer(state: RunState, result: SearchResult) -> None:
+    """Answer the original question from the top-ranked region, when enabled."""
+    if not state.settings.get("answer_question", True):
+        return
+    started = time.perf_counter()
+    state.on_event(
+        "answer_started",
+        "Generate the final text answer from the top-ranked region.",
+        {"question": state.question},
+    )
+    try:
+        answer = answer_top_region(state, result)
+    except Exception as exc:
+        message = f"Final answer failed: {type(exc).__name__}: {exc}"
+        result["warnings"] = [*result.get("warnings", []), message]
+        state.on_event("answer_failed", message, {"error": message})
+        return
+    if answer is None:
+        state.on_event(
+            "answer_skipped",
+            "No answerer or no ranked region; keeping the localization output only.",
+            {"question": state.question},
+        )
+        return
+    result["final_answer"] = answer
+    state.on_event(
+        "answer_completed",
+        f"Final answer: {answer['answer']}",
+        {
+            "question": answer["question"],
+            "answer": answer["answer"],
+            "bbox": answer["bbox"],
+            "crop_bbox": answer["crop_bbox"],
+            "duration_seconds": time.perf_counter() - started,
+            "model_id": answer["model_id"],
+        },
     )
 
 

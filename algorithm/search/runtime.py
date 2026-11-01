@@ -43,6 +43,7 @@ class SearchRequest:
 
     image: NDArray
     query: str
+    question: str | None = None  # Original question; falls back to query.
     config: SearchConfig | None = None
     scorer: Scorer | None = None
     detector: Detector | None = None
@@ -66,6 +67,7 @@ class RunState:
     """All mutable state for one search, replacing hidden closure variables."""
 
     query: str
+    question: str
     settings: SearchConfig
     usage: SearchUsage
     source_image: Image.Image
