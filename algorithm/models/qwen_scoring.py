@@ -9,8 +9,8 @@ import torch
 from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 
 from ..core.contracts import CandidatePrompt, RegionAssessment, VerifierScore
-from ..core.errors import InvalidScoreResponse
 from ..core.calls import generate_rating
+from ..core.query_plan import STRUCTURED_QUERY_PROMPT, parse_query_plan
 from .scoring import (
     CONTEXT_INSTRUCTIONS,
     SCORING_PROMPT,
@@ -309,6 +309,14 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
         on_request()
         return _generate_image_text(image, prompt, 96)
 
+    @torch.inference_mode()
+    def resolve_structured(question: str, *, on_request: Callable = _ignore_request) -> dict:
+        plan, _, _ = generate_rating(lambda prompt: _generate_text(prompt, 512),
+            lambda reply: parse_query_plan(reply, question), STRUCTURED_QUERY_PROMPT.format(question=json.dumps(question)),
+            on_request, "Return only valid JSON with entity_concept, part_concept, reference_concepts and scene_constraints.")
+        return plan
+
+    setattr(score, "resolve_structured", resolve_structured)
     setattr(score, "answer_evidence", answer_evidence)
     setattr(score, "rewrite", rewrite)
     setattr(score, "resolve", resolve)

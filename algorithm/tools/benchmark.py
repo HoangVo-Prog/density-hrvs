@@ -130,6 +130,9 @@ def main() -> None:
         action="store_true",
         help="Resize existing display copies without running inference",
     )
+    parser.add_argument("--config-file", type=Path, help="JSON overrides applied after CLI defaults")
+    parser.add_argument("--question-ids", nargs="+", help="Explicit question IDs, filtered before limits")
+    parser.add_argument("--no-stages", action="store_true", help="Skip heavy per-node diagnostic images")
     args = parser.parse_args()
     if args.compact_existing:
         for checkpoint in sorted(args.output_dir.glob("*/completion.json")):
@@ -148,6 +151,11 @@ def main() -> None:
         )
         for r in rows
     ]
+    if args.question_ids:
+        wanted = set(args.question_ids)
+        questions = [q for q in questions if q["question_id"] in wanted]
+        if {q["question_id"] for q in questions} != wanted:
+            raise ValueError("Some requested question IDs are absent from the dataset")
     if args.limit_images < 0:
         parser.error("limit-images must be nonnegative")
     image_ids = sorted({q["image_id"] for q in questions})
@@ -177,6 +185,13 @@ def main() -> None:
     settings["discovery_seeds"] = args.discovery_seeds
     settings["discovery_overlap"] = args.discovery_overlap
     settings["answer_question"] = not args.no_final_answer
+    if args.config_file is not None:
+        overrides = json.loads(args.config_file.read_text())
+        if not isinstance(overrides, dict):
+            raise ValueError("config-file must contain an object")
+        settings.update(overrides)
+    from ..search.config import validate_search_config
+    validate_search_config(settings)
     settings_path = args.output_dir / "config.json"
     serialized = json.loads(json.dumps(settings))
     if settings_path.exists() and json.loads(settings_path.read_text()) != serialized:
@@ -216,7 +231,7 @@ def main() -> None:
 
         return call
 
-    for prompt_method in ("rewrite", "resolve", "answer", "answer_evidence"):
+    for prompt_method in ("rewrite", "resolve", "resolve_structured", "answer", "answer_evidence"):
         method = getattr(qwen, prompt_method, None)
         if callable(method):
             setattr(score, prompt_method, guarded(method))
@@ -282,7 +297,7 @@ def main() -> None:
                 local_scorer=score,
                 detector=detect,
                 feature_extractor=features,
-                artifact_dir=folder / "stages",
+                artifact_dir=None if args.no_stages else folder / "stages",
                 progress=lambda message: print(
                     f"{question['question_id']}: {message}", flush=True
                 ),

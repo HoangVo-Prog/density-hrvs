@@ -73,6 +73,11 @@ def default_search_config() -> SearchConfig:
         "strict_fallback_limit": True,
         "answer_context_padding": 384,
         "answer_view": "legacy_crop",
+        "structured_query": False,
+        "part_refinement": False,
+        "finalization_reserve": 4,
+        "max_part_detector_calls": 1,
+        "part_candidate_limit": 3,
     }
 
 
@@ -139,11 +144,17 @@ def _validate_candidate_settings(config: SearchConfig) -> None:
         raise ValueError("candidate_query_mode must be 'full' or 'target_phrase'")
     if not isinstance(config.get("answer_question", True), bool):
         raise ValueError("answer_question must be a boolean")
-    for flag in ("require_verified_answer", "strict_fallback_limit"):
+    for flag in ("require_verified_answer", "strict_fallback_limit", "structured_query", "part_refinement"):
         if not isinstance(config.get(flag, True), bool):
             raise ValueError(f"{flag} must be a boolean")
     if config.get("answer_view", "legacy_crop") not in {"marked_detail", "legacy_crop"}:
         raise ValueError("answer_view must be marked_detail or legacy_crop")
+    for name in ("finalization_reserve", "max_part_detector_calls", "part_candidate_limit"):
+        value = config.get(name, 0)
+        if type(value) is not int or value < 0:
+            raise ValueError(f"{name} must be a nonnegative integer")
+    if config.get("part_refinement", False) and not config.get("structured_query", False):
+        raise ValueError("part_refinement requires structured_query")
     answer_padding = config.get("answer_context_padding", 384)
     if type(answer_padding) is not int or answer_padding < 0:
         raise ValueError("answer_context_padding must be a nonnegative integer")

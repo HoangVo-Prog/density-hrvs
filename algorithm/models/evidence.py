@@ -97,6 +97,7 @@ def build_proposal_evidence(
     context_padding: int = 384,
     detail_padding: int = 16,
     mark_detail: bool = True,
+    reference_bbox: BoundingBox | None = None,
 ) -> ProposalEvidence:
     """Compose one model input with marked context and an enlarged target detail.
 
@@ -179,6 +180,13 @@ def build_proposal_evidence(
                 outline=target_color,
                 width=stroke,
             )
+        if reference_bbox is not None and title.startswith("CONTEXT"):
+            rx1, ry1, rx2, ry2 = reference_bbox
+            clipped = (max(rx1, box[0]), max(ry1, box[1]), min(rx2, box[2]), min(ry2, box[3]))
+            if clipped[0] < clipped[2] and clipped[1] < clipped[3]:
+                owner = (px + round((clipped[0]-box[0])*sx), py + round((clipped[1]-box[1])*sy),
+                         px + round((clipped[2]-box[0])*sx), py + round((clipped[3]-box[1])*sy))
+                draw.rectangle((owner[0],owner[1],owner[2]-1,owner[3]-1),outline="#ff5ca8",width=stroke)
         draw.text((left, gap), title, font=face, fill="white")
         return mapped, rendered.size
 

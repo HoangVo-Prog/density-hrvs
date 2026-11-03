@@ -10,7 +10,7 @@ The authoritative baseline is commit `1ce161b`. Existing benchmark artifacts are
 | 0 | Frozen source/JSON evidence, independently checked metrics, diagnostic selection | Verified on all 134 questions; 408 evidence/source files frozen and hashed |
 | 1 | Fallback cap, physical generation accounting, acceptance eligibility, partial evidence | Implemented; 10 targeted tests pass |
 | 2 | Marked context and clean enlarged answer detail; frozen-box GPU comparison | Implemented; 12 tests pass; full 134-case paired GPU experiment complete; opt-in |
-| 3 | Structured entity/part/anchor resolver and linked boxes | Pending |
+| 3 | Structured entity/part/anchor resolver and linked boxes | Implemented opt-in; 19 tests pass; native GPU probes complete; no quality gain established |
 | 4 | Instance-aware grouping and comparative reranking | Pending |
 | 5 | Bounded crop recovery and Grounding DINO fallback | Pending |
 | 6 | Matched-budget controller and partition ablations | Pending |
@@ -60,3 +60,25 @@ adjudication for synonyms and sentence wording. The new view increased abstentio
 It improves particular part-reading cases but regresses others; `answer_view=legacy_crop`
 therefore remains the default. No overall accuracy improvement is claimed. Structured part
 binding and further controlled evidence experiments remain necessary.
+
+
+Phase 3: `structured_query=true` extracts entity, requested part and reference descriptions
+from the question; the original full relation description is retained. `part_refinement=true`
+runs one bounded SAM3 pass around a verified owner and verifies a cyan part against its
+magenta owner. Entity and attribute boxes remain separate; the primary localization box
+is never swapped using evaluation labels. Finalization requests share the search budget,
+with a configurable reserve. Standalone SAM3 loading now uses the pinned local checkpoint
+instead of an unavailable sibling-project import.
+
+GPU evidence: the simpler flat resolver parsed 8/8 questions in one request each, but
+unknown-object/support role assignments are still imperfect. On four frozen inference
+owners, SAM3 produced Qwen-accepted backpack, badge and phone parts; the camera lower dome
+had no part proposal. Acceptance is not ground truth: the backpack verifier hallucinated
+vegetables. Full relational answering still abstained on the three accepted parts. A
+focused-question probe also failed to establish an improvement (badge blue, backpack and
+phone Uncertain, camera dome black). Focused rewriting is therefore not enabled.
+One full SAM3+DINO+Qwen pipeline smoke on 0411_q02 completed within its 12-generation
+search cap, but found no eligible owner. These are implementation/plumbing checks, not
+accuracy gains. Artifacts are under `algo1_improve/phase3_query_probe_v2`,
+`phase3_part_probe` and `phase3_smoke` on the secondary output drive. Both features remain
+off by default until comparative candidate verification and broader evaluation support them.

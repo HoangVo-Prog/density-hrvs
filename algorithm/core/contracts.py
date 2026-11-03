@@ -147,6 +147,11 @@ class RankedRegion(SAM3Region):
     candidate_rank: NotRequired[int]  # One-based SAM3 confidence order.
     candidate_score: NotRequired[float]  # Explicit alias of score for proposal scope.
     candidate_verified: NotRequired[bool]  # Qwen said Yes above the acceptance score.
+    entity_bbox: NotRequired[BoundingBox]
+    attribute_bbox: NotRequired[BoundingBox]
+    attribute_verifier: NotRequired[VerifierScore]
+    attribute_concept: NotRequired[str]
+    role: NotRequired[str]
     candidate_qwen: NotRequired[VerifierScore]  # Verdict when this box was checked.
     score_components: NotRequired[RegionScoreComponents]
 
@@ -193,6 +198,12 @@ class SlicClusters(SlicClusterAssignments):
 
 
 class SearchConfig(TypedDict):
+    structured_query: NotRequired[bool]
+    query_plan: NotRequired[dict]
+    part_refinement: NotRequired[bool]
+    finalization_reserve: NotRequired[int]
+    max_part_detector_calls: NotRequired[int]
+    part_candidate_limit: NotRequired[int]
     answer_view: NotRequired[str]
     require_verified_answer: NotRequired[bool]
     strict_fallback_limit: NotRequired[bool]
@@ -383,6 +394,7 @@ class SearchUsage(TypedDict):
 class FinalAnswer(TypedDict):
     """Text answer generated from the original question and the top-ranked region."""
 
+    attribute_bbox: NotRequired[BoundingBox | None]
     view_type: NotRequired[str]
     selected_candidate_id: NotRequired[str]
     evidence_info: NotRequired[dict]
@@ -401,6 +413,7 @@ class FinalAnswer(TypedDict):
 
 
 class SearchResult(TypedDict):
+    part_refinement: NotRequired[dict]
     abstention: NotRequired[dict[str, str]]
     """Search evidence and trace; arrays are excluded from the JSON summary."""
 
@@ -474,6 +487,7 @@ class ProposalReport(ClusterReport):
 
 class SearchReport(TypedDict):
     schema_version: NotRequired[int]
+    part_refinement: NotRequired[dict]
     abstention: NotRequired[dict[str, str]]
     """results.json schema; all paths are relative to the output directory."""
 

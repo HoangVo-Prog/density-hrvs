@@ -107,14 +107,28 @@ class RunState:
 
     def charge_local(self) -> None:
         """Bill one local generation or raise before running it."""
-        charge_generation(self.usage, "verification", self.settings.get("max_local_scores", 32))
+        charge_generation(self.usage, "verification", self.tree_generation_limit())
+
+    def tree_generation_limit(self) -> int:
+        budget = self.settings.get("max_local_scores", 32)
+        reserve = self.settings.get("finalization_reserve", 4) if self.settings.get("part_refinement", False) else 0
+        return max(1, budget - reserve) if budget else 0
+
+    def charge_final(self, stage: str) -> None:
+        charge_generation(self.usage, stage, self.settings.get("max_local_scores", 32))
+
+    def remaining_final_generations(self) -> int | None:
+        budget = self.settings.get("max_local_scores", 32)
+        if not budget:
+            return None
+        return max(0, budget - self.usage.get("search_generations", self.usage.get("local_score_calls", 0)))
 
     def charge_answer(self) -> None:
         """The post-search answer is outside the search budget, but still counted."""
         charge_generation(self.usage, "answer")
 
     def remaining_generations(self) -> int | None:
-        budget = self.settings.get("max_local_scores", 32)
+        budget = self.tree_generation_limit()
         if not budget:
             return None
         used = self.usage.get("search_generations", self.usage.get("local_score_calls", 0))

@@ -32,6 +32,7 @@ def _resolve_sam_prompt(
     scorer: LocalScorer,
     usage: SearchUsage,
     on_event: EventSink,
+    question: str | None = None,
 ) -> None:
     """Ask Qwen to choose the SAM3 localization target from the full query.
 
@@ -42,6 +43,20 @@ def _resolve_sam_prompt(
     """
     if not settings.get("rewrite_sam_prompt", True):
         return
+    if settings.get("structured_query", False):
+        structured = getattr(scorer, "resolve_structured", None)
+        if callable(structured):
+            try:
+                plan = invoke_counted(structured, question or query,
+                    on_request=lambda: charge_generation(usage, "resolver"))
+                settings["query_plan"] = plan
+                settings["sam_prompt"] = plan["entity"]["concept"]
+                usage["local_prompt_calls"] = usage.get("local_prompt_calls", 0) + 1
+                on_event("query_resolved", "Resolved entity, requested part and reference roles.", {"query_plan": plan})
+                return
+            except Exception as exc:
+                on_event("query_resolution_failed", "Structured resolution failed; use logged legacy fallback.",
+                         {"error": f"{type(exc).__name__}: {exc}"})
     resolver = getattr(scorer, "resolve", None)
     rewriter = getattr(scorer, "rewrite", None)
     if not callable(resolver) and not callable(rewriter):
@@ -97,6 +112,7 @@ def _prepare_local_scorer(
     provided: LocalScorer | None,
     usage: SearchUsage,
     on_event: EventSink,
+    question: str | None = None,
 ) -> LocalScorer:
     loading = time.perf_counter()
     on_event(
@@ -113,7 +129,7 @@ def _prepare_local_scorer(
             "duration_seconds": time.perf_counter() - loading,
         },
     )
-    _resolve_sam_prompt(settings, query, scorer, usage, on_event)
+    _resolve_sam_prompt(settings, query, scorer, usage, on_event, question)
     return scorer
 
 
@@ -240,6 +256,7 @@ def prepare_run(request: SearchRequest) -> RunState:
             request.local_scorer,
             usage,
             request.on_event,
+            question=request.question,
         )
         if custom_scorer is None
         else None

@@ -55,7 +55,8 @@ def answer_top_region(state: RunState, result: SearchResult) -> FinalAnswer | No
         return None
     best = eligible[0]
     padding = state.settings.get("answer_context_padding", 384)
-    crop_bbox = padded_bbox(best["bbox"], state.source_image.size, padding)
+    answer_bbox = best.get("attribute_bbox", best["bbox"])
+    crop_bbox = padded_bbox(answer_bbox, state.source_image.size, padding)
     x1, y1, x2, y2 = crop_bbox
     if x2 - x1 < 2 or y2 - y1 < 2:
         return None
@@ -66,7 +67,7 @@ def answer_top_region(state: RunState, result: SearchResult) -> FinalAnswer | No
         if not callable(evidence_answerer):
             raise ValueError("marked_detail requires an answer_evidence callable")
         answerer = evidence_answerer
-        evidence = build_answer_evidence(state.source_image, best["bbox"],
+        evidence = build_answer_evidence(state.source_image, answer_bbox,
             max_side=state.settings.get("verification_max_side", 1536),
             context_padding=padding, detail_padding=state.settings.get("detail_padding", 16))
         crop = Image.fromarray(evidence["image"])
@@ -81,6 +82,7 @@ def answer_top_region(state: RunState, result: SearchResult) -> FinalAnswer | No
         raise ValueError("answerer returned a non-string")
     answer = clean_answer(raw)
     return {
+        "attribute_bbox": best.get("attribute_bbox"),
         "view_type": view_type,
         "selected_candidate_id": f"node_{best.get('cluster_id', 'unknown')}:candidate_{best.get('candidate_rank', 'unknown')}",
         "evidence_info": evidence_info(evidence) if evidence is not None else {},

@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from pathlib import Path
-import sys
+import json
 from types import SimpleNamespace
 
 import numpy as np
@@ -14,16 +14,33 @@ from ..core.events import SAM3CandidateRecord
 from ..core.imaging import to_pil_rgb
 
 
-def load_sam3_model(device: str = "auto"):
-    """Reuse the project's pinned SAM3 loader, loading weights only on request."""
-    scripts_path = str(Path(__file__).resolve().parents[2] / "scripts")
-    if scripts_path not in sys.path:
-        sys.path.insert(0, scripts_path)
-    from scripts.vision_backends import load_sam3
+SAM3_ID = "facebook/sam3"
+SAM3_REVISION = "3c879f39826c281e95690f02c7821c4de09afae7"
 
+
+def load_sam3_model(device: str = "auto"):
+    """Load the pinned cached image detector without a sibling scripts checkout."""
+    from huggingface_hub import hf_hub_download
+    from transformers import (AutoTokenizer, Sam3Model, Sam3VideoModel,
+                              Sam3Processor, Sam3ImageProcessor)
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
-    return load_sam3(device=device, dtype=torch.float32)
+    snapshot = Path(hf_hub_download(SAM3_ID, "config.json",
+        revision=SAM3_REVISION, local_files_only=True)).parent
+    config = json.loads((snapshot / "config.json").read_text())
+    if config["model_type"] == "sam3_video":
+        settings = json.loads((snapshot / "processor_config.json").read_text())["image_processor"]
+        settings = {key: value for key, value in settings.items()
+                    if value is not None and key not in {"processor_class", "image_processor_type"}}
+        processor = Sam3Processor(image_processor=Sam3ImageProcessor(**settings),
+            tokenizer=AutoTokenizer.from_pretrained(snapshot, local_files_only=True))
+        container = Sam3VideoModel.from_pretrained(snapshot, dtype=torch.float32, local_files_only=True)
+        model = container.detector_model
+        del container
+    else:
+        processor = Sam3Processor.from_pretrained(snapshot, local_files_only=True)
+        model = Sam3Model.from_pretrained(snapshot, dtype=torch.float32, local_files_only=True)
+    return model.to(device).eval(), processor
 
 
 def _validate_inputs(

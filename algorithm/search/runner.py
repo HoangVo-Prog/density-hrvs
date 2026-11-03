@@ -22,6 +22,7 @@ from ..models.qwen_scoring import LocalScorer
 from ..reporting.artifacts import save_search_result
 from .answering import answer_top_region
 from .eligibility import answer_eligible
+from .parts import refine_answer_part
 from .discovery import discover_seed_regions
 from .pipeline import estimate_node, evaluate_node, split_node
 from .runtime import RunState, SearchRequest
@@ -111,6 +112,7 @@ def run_visual_search(
         on_event=state.on_event,
     )
     _attach_rankings(state, result)
+    refine_answer_part(state, result)
     _attach_final_answer(state, result)
     result["elapsed_seconds"] = time.perf_counter() - state.started_at
     _finalize_artifacts(state, result)
