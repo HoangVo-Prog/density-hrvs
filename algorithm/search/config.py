@@ -73,6 +73,8 @@ def default_search_config() -> SearchConfig:
         "strict_fallback_limit": True,
         "answer_context_padding": 384,
         "answer_view": "legacy_crop",
+        "comparative_reranking": False,
+        "rerank_candidate_limit": 5,
         "structured_query": False,
         "part_refinement": False,
         "finalization_reserve": 4,
@@ -144,7 +146,7 @@ def _validate_candidate_settings(config: SearchConfig) -> None:
         raise ValueError("candidate_query_mode must be 'full' or 'target_phrase'")
     if not isinstance(config.get("answer_question", True), bool):
         raise ValueError("answer_question must be a boolean")
-    for flag in ("require_verified_answer", "strict_fallback_limit", "structured_query", "part_refinement"):
+    for flag in ("require_verified_answer", "strict_fallback_limit", "structured_query", "part_refinement", "comparative_reranking"):
         if not isinstance(config.get(flag, True), bool):
             raise ValueError(f"{flag} must be a boolean")
     if config.get("answer_view", "legacy_crop") not in {"marked_detail", "legacy_crop"}:
@@ -155,6 +157,8 @@ def _validate_candidate_settings(config: SearchConfig) -> None:
             raise ValueError(f"{name} must be a nonnegative integer")
     if config.get("part_refinement", False) and not config.get("structured_query", False):
         raise ValueError("part_refinement requires structured_query")
+    if type(config.get("rerank_candidate_limit", 5)) is not int or not 1 <= config.get("rerank_candidate_limit", 5) <= 5:
+        raise ValueError("rerank_candidate_limit must be an integer in [1, 5]")
     answer_padding = config.get("answer_context_padding", 384)
     if type(answer_padding) is not int or answer_padding < 0:
         raise ValueError("answer_context_padding must be a nonnegative integer")

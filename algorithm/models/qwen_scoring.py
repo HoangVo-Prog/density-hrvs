@@ -102,6 +102,26 @@ Search description: {query}
 """
 
 
+COMPARISON_PROMPT = """Compare the numbered candidate objects against the full search description.
+LEFT is the whole scene with numbered boxes. RIGHT contains the corresponding
+clean enlarged detail crops. The colored box/number is an annotation, not an
+object attribute. Use scene context for references and spatial relationships;
+use detail crops for identity and clothing. All required properties must refer
+to the SAME object. Reference objects are clues, not the requested target.
+Candidates may all be wrong. Never choose the closest-looking candidate when
+required identity/relation evidence is missing. Answer No or Uncertain as needed.
+Do not invent missing visual details. Give a short visual reason for each rating.
+
+Return ONLY JSON with ranking (every index 1 through {count}, best first),
+best_index (the first ranking entry), and candidates (one object per index with
+index, answer exactly Yes/No/Uncertain, score from 0 to 100, reason string).
+Output must be ONE JSON OBJECT, never an array. Use short reasons (at most 12 words).
+Required JSON structure (replace ratings, reasons, and ranking using the image):
+{schema}
+Search description: {query}
+"""
+
+
 class LocalScorer(Protocol):
     """Scores ordinary crops or marked context/detail sheets using local weights."""
 
@@ -291,6 +311,22 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
         }
 
     @torch.inference_mode()
+    def compare_candidates(image: Image.Image, query: str, count: int, *,
+                           on_request: Callable = _ignore_request) -> RegionAssessment:
+        schema = {"ranking": list(range(1, count+1)), "best_index": 1,
+                  "candidates": [{"index": i, "answer": "Uncertain", "score": 0, "reason": ""}
+                                 for i in range(1, count+1)]}
+        prompt = COMPARISON_PROMPT.format(count=count, query=json.dumps(query), schema=json.dumps(schema))
+        assessment, text, final_prompt = generate_rating(
+            lambda current: _generate_image_text(image, current, 768),
+            lambda reply: parse_region_assessment(reply, list(range(1, count+1))),
+            prompt, on_request, "Return valid JSON and rate and rank every numbered index exactly once.")
+        assessment['ratings'] = {index: {**rating, 'model_id': QWEN_MODEL,
+            'model_revision': QWEN_REVISION, 'raw_response': text, 'prompt': final_prompt,
+            'input_size': image.size} for index,rating in assessment['ratings'].items()}
+        return assessment
+
+    @torch.inference_mode()
     def answer(
         image: Image.Image,
         question: str,
@@ -316,6 +352,7 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
             on_request, "Return only valid JSON with entity_concept, part_concept, reference_concepts and scene_constraints.")
         return plan
 
+    setattr(score, "compare_candidates", compare_candidates)
     setattr(score, "resolve_structured", resolve_structured)
     setattr(score, "answer_evidence", answer_evidence)
     setattr(score, "rewrite", rewrite)

@@ -2,6 +2,8 @@
 
 
 def answer_eligible(proposal: dict, config: dict) -> bool:
+    if proposal.get('comparative_eligible') is False:
+        return False
     if not config.get('require_verified_answer', True):
         return True
     rating = proposal.get('verifier', {})

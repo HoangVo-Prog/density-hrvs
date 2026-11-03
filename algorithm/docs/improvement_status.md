@@ -11,7 +11,7 @@ The authoritative baseline is commit `1ce161b`. Existing benchmark artifacts are
 | 1 | Fallback cap, physical generation accounting, acceptance eligibility, partial evidence | Implemented; 10 targeted tests pass |
 | 2 | Marked context and clean enlarged answer detail; frozen-box GPU comparison | Implemented; 12 tests pass; full 134-case paired GPU experiment complete; opt-in |
 | 3 | Structured entity/part/anchor resolver and linked boxes | Implemented opt-in; 19 tests pass; native GPU probes complete; no quality gain established |
-| 4 | Instance-aware grouping and comparative reranking | Pending |
+| 4 | Instance-aware grouping and comparative reranking | Implemented opt-in; 23 tests pass; 134-case GPU evaluation running |
 | 5 | Bounded crop recovery and Grounding DINO fallback | Pending |
 | 6 | Matched-budget controller and partition ablations | Pending |
 | 7 | Optional same-instance consensus experiment | Pending |
@@ -82,3 +82,20 @@ search cap, but found no eligible owner. These are implementation/plumbing check
 accuracy gains. Artifacts are under `algo1_improve/phase3_query_probe_v2`,
 `phase3_part_probe` and `phase3_smoke` on the secondary output drive. Both features remain
 off by default until comparative candidate verification and broader evaluation support them.
+
+
+Phase 4: groups only near-identical geometric hypotheses (IoU >= .9, similar dimensions,
+same role/concept), preserving all members and nested part/owner boxes. This is conservative
+duplicate grouping, not proof of semantic identity. A rank/diversity shortlist of at most
+five representatives is compared using numbered global context and clean enlarged detail
+crops without confidence/label hints. All-No, Uncertain, or ambiguous comparisons produce
+no answer-eligible winner. Earlier isolated Yes scores cannot override a comparative
+rejection. Comparative repairs consume the shared finalization reserve. Original proposal
+pools are preserved for coverage evaluation. The experimental basis is visual marking
+(Set-of-Mark, https://arxiv.org/abs/2310.11441), not evidence that this 2B model must improve.
+
+The first native schema failed three initial cases; those artifacts are retained in
+`phase4_frozen_pool`. Explicit JSON syntax fixed the four-case pilot (`phase4_frozen_pool_v2`):
+three selections and one no-unambiguous-match. No accuracy conclusion follows from that.
+Full paired frozen-pool inference is running in `phase4_full`. The feature remains off by
+default pending localization and regression analysis on all 134 cases.

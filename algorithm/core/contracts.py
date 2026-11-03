@@ -198,6 +198,8 @@ class SlicClusters(SlicClusterAssignments):
 
 
 class SearchConfig(TypedDict):
+    comparative_reranking: NotRequired[bool]
+    rerank_candidate_limit: NotRequired[int]
     structured_query: NotRequired[bool]
     query_plan: NotRequired[dict]
     part_refinement: NotRequired[bool]
@@ -413,6 +415,7 @@ class FinalAnswer(TypedDict):
 
 
 class SearchResult(TypedDict):
+    reranking: NotRequired[dict]
     part_refinement: NotRequired[dict]
     abstention: NotRequired[dict[str, str]]
     """Search evidence and trace; arrays are excluded from the JSON summary."""

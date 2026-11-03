@@ -109,7 +109,7 @@ def save_search_result(
         elif proposal.get("scoring_scope") == "proposal":
             proposal_report["scoring_scope"] = "proposal"
         for name in ("candidate_rank", "candidate_score", "candidate_verified",
-                     "entity_bbox", "attribute_bbox", "attribute_verifier", "attribute_concept", "role"):
+                     "comparative_eligible", "previous_verifier", "entity_bbox", "attribute_bbox", "attribute_verifier", "attribute_concept", "role"):
             if name in proposal:
                 proposal_report[name] = proposal[name]
         if "score_components" in proposal:
@@ -135,6 +135,8 @@ def save_search_result(
         "clusters": clusters,
         "proposals": proposals,
     }
+    if result.get("reranking"):
+        report["reranking"] = result["reranking"]
     if result.get("part_refinement"):
         report["part_refinement"] = result["part_refinement"]
     if result.get("abstention"):
