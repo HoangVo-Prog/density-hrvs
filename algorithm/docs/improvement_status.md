@@ -11,8 +11,8 @@ The authoritative baseline is commit `1ce161b`. Existing benchmark artifacts are
 | 1 | Fallback cap, physical generation accounting, acceptance eligibility, partial evidence | Implemented; 10 targeted tests pass |
 | 2 | Marked context and clean enlarged answer detail; frozen-box GPU comparison | Implemented; 12 tests pass; full 134-case paired GPU experiment complete; opt-in |
 | 3 | Structured entity/part/anchor resolver and linked boxes | Implemented opt-in; 19 tests pass; native GPU probes complete; no quality gain established |
-| 4 | Instance-aware grouping and comparative reranking | Implemented opt-in; 23 tests pass; 134-case GPU evaluation running |
-| 5 | Bounded crop recovery and Grounding DINO fallback | Pending |
+| 4 | Instance-aware grouping and comparative reranking | Implemented opt-in; 23 tests pass; 134-case GPU evaluation complete; 41 localized versus baseline 45; keep off |
+| 5 | Bounded crop recovery and Grounding DINO fallback | Bounded fallback implemented opt-in; 26 tests pass; native detector and integration probes complete; expanded-crop retry pending |
 | 6 | Matched-budget controller and partition ablations | Pending |
 | 7 | Optional same-instance consensus experiment | Pending |
 
@@ -99,3 +99,32 @@ The first native schema failed three initial cases; those artifacts are retained
 three selections and one no-unambiguous-match. No accuracy conclusion follows from that.
 Full paired frozen-pool inference is running in `phase4_full`. The feature remains off by
 default pending localization and regression analysis on all 134 cases.
+
+
+Completed Phase 4 result (`phase4_full/evaluation.json`): 134 frozen-pool questions;
+113 selections, 18 ambiguous/rejected comparisons, one empty pool, two malformed responses.
+Selected localization IoU >= .5: 41/134 versus original 45/134, zero gains and four regressions.
+The five representative shortlist retains an IoU-qualified box in 66/134 versus 80/134 in
+full pools and 67/134 in original top-five pools. Display index 1 dominates predictions;
+counterbalanced ordering and larger-model testing are needed before any benefit claim.
+The feature remains disabled by default.
+
+Phase 5: pinned Grounding DINO tiny revision `a2bb814dd30d776dcf7e30523b00659f4f141c71`,
+loaded lazily from an explicit cache. Trigger only on an empty root, a child of a visually
+positive parent, or a missing requested part. Default cap is one fallback detector call
+per question, shared across these triggers; no remaining verifier budget means no new
+fallback work. Raw pre-threshold scores, cap decisions and source crop coordinates are
+saved. Box-only rectangular masks are explicitly labelled; Grounding DINO confidence is
+never represented as SAM3 confidence. Qwen remains responsible for accepting proposals.
+A global preflight makes root misses reachable because the original tree partitions root
+before evaluation. Existing nonempty SAM3 root proposals are currently cached rather than
+introduced as extra verified proposals.
+
+Native GPU detector probes on frozen inference inputs: 0467_q02 scooter 2 boxes; 0411_q02
+badge 2; 0649_q02 phone 2; 1497_q02 lower dome 4. Counts establish execution, not accuracy.
+The first badge/phone proposals visibly cover their small objects; false proposals also
+exist. Full unchanged-model-stack smoke on 0467_q02 completes (no fallback triggered because
+current root SAM3 is nonempty), but does not localize the evaluation target. A controlled
+empty-SAM integration uses native Grounding DINO and Qwen, with RGB features solely for
+plumbing; it is explicitly not a detector-quality benchmark. Expanded overlapping crop
+retry and broad accuracy evaluation remain pending. All fallback features stay opt-in.

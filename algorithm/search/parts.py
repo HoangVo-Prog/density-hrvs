@@ -14,6 +14,7 @@ from ..core.errors import InvalidScoreResponse, LocalBudgetExceeded
 from ..models.evidence import build_proposal_evidence, evidence_info
 from .eligibility import eligible_regions
 from .answering import padded_bbox
+from .recovery import fallback_boxes
 
 
 def refine_answer_part(state, result) -> None:
@@ -48,6 +49,9 @@ def refine_answer_part(state, result) -> None:
     finally:
         state.context.folder, state.context.node_id = old_folder, old_node
         state.record_cost('detect', time.perf_counter()-tick)
+    if not detections:
+        detections = fallback_boxes(state, state.rgb[y0:y1,x0:x1].copy(), part["concept"],
+            reason="empty_requested_part", source_bbox=window)
     records=[]
     candidates=sorted(detections,key=lambda d:d.get('sam3_score') or 0,reverse=True)
     for index,detection in enumerate(candidates[:state.settings.get('part_candidate_limit',3)],1):

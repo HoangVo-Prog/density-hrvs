@@ -28,7 +28,9 @@ from .discovery import discover_seed_regions
 from .pipeline import estimate_node, evaluate_node, split_node
 from .runtime import RunState, SearchRequest
 from .setup import prepare_run
-from .tree import explore_tree
+from .tree import explore_tree, new_node
+from .evaluation import detect_region
+from ..core.errors import LocalBudgetExceeded
 
 __all__ = ["run_visual_search", "save_search_result"]
 
@@ -94,6 +96,21 @@ def run_visual_search(
             on_event=on_event,
         )
     )
+    if state.settings.get("grounding_dino_fallback", False):
+        # The ordinary tree partitions before evaluating root. Explicitly check a
+        # global miss once so root fallback is reachable even with no parent Yes.
+        root = new_node(_root_region(state), 0, -1, 0)
+        folder = state.node_folder(0)
+        if folder is not None:
+            folder.mkdir(parents=True, exist_ok=True)
+        state.context.folder, state.context.node_id = folder, 0
+        found = detect_region(state, root, state.rgb)
+        if any(d.get("proposal_backend") == "IDEA-Research/grounding-dino-tiny" for d in found):
+            try:
+                evaluate_node(state, root)
+            except LocalBudgetExceeded:
+                pass  # Completed candidate evidence is retained; tree sees the spent cap.
+        state.context.folder, state.context.node_id = None, -1
     state.seed_children = discover_seed_regions(state)
     observer = (
         (lambda nodes, trace: save_tree(state.artifacts / "tree", nodes, trace))

@@ -109,7 +109,7 @@ def save_search_result(
         elif proposal.get("scoring_scope") == "proposal":
             proposal_report["scoring_scope"] = "proposal"
         for name in ("candidate_rank", "candidate_score", "candidate_verified",
-                     "comparative_eligible", "previous_verifier", "entity_bbox", "attribute_bbox", "attribute_verifier", "attribute_concept", "role"):
+                     "proposal_backend", "detector_score", "mask_kind", "model_revision", "comparative_eligible", "previous_verifier", "entity_bbox", "attribute_bbox", "attribute_verifier", "attribute_concept", "role"):
             if name in proposal:
                 proposal_report[name] = proposal[name]
         if "score_components" in proposal:

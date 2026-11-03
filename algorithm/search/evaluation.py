@@ -13,6 +13,7 @@ from ..core.errors import InvalidScoreResponse
 from ..core.imaging import to_pil_rgb
 from ..models.scoring import ScoringView
 from .runtime import RunState
+from .recovery import recover_empty_region
 
 
 def score_crop(
@@ -148,7 +149,10 @@ def detect_region(
                 "proposal_limit": state.settings["max_proposals_per_node"],
             },
         )
+        state.usage["primary_detector_calls"] = state.usage.get("primary_detector_calls", 0) + 1
         detections = state.detector(pixels, state.settings["sam_prompt"] or state.query)
+        if not detections:
+            detections = recover_empty_region(state, node, pixels)
         state.detection_cache[node["node_id"]] = sorted(
             [
                 detection

@@ -27,15 +27,17 @@ def distinct_detections(
     """Return confidence-ordered boxes after duplicate suppression."""
     distinct: list[SAM3Detection] = []
     for detection in sorted(
-        detections, key=lambda d: d["sam3_score"] or 0.0, reverse=True
+        detections, key=lambda d: d["sam3_score"] if d["sam3_score"] is not None else d.get("detector_score", 0.), reverse=True
     ):
         confidence = detection["sam3_score"]
+        if confidence is None and detection.get("proposal_backend"):
+            confidence = detection.get("detector_score")
         if (
             confidence is None
             or not math.isfinite(confidence)
             or not 0 <= confidence <= 1
         ):
-            raise ValueError("Candidate statistics require valid SAM3 confidence")
+            raise ValueError("Candidate statistics require a valid, attributed detector confidence")
         if all(
             bbox_iou(detection["bbox"], kept["bbox"])
             <= config.get("region_nms_iou", 0.7)
@@ -63,6 +65,9 @@ def candidate_score(
     total = sum(weights)
     if total <= 0:
         raise ValueError("Candidate score weights must sum to a positive value")
+    # A different backend confidence is not calibrated as SAM3 confidence.
+    if sam3_score is None:
+        return qwen
     return (weights[0] * qwen + weights[1] * detector) / total
 
 

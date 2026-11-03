@@ -73,6 +73,13 @@ def default_search_config() -> SearchConfig:
         "strict_fallback_limit": True,
         "answer_context_padding": 384,
         "answer_view": "legacy_crop",
+        "grounding_dino_fallback": False,
+        "max_fallback_detector_calls": 1,
+        "fallback_cache_dir": None,
+        "fallback_threshold": .25,
+        "fallback_text_threshold": .25,
+        "fallback_proposal_limit": 8,
+        "recovery_promising_score": .7,
         "comparative_reranking": False,
         "rerank_candidate_limit": 5,
         "structured_query": False,
@@ -146,12 +153,12 @@ def _validate_candidate_settings(config: SearchConfig) -> None:
         raise ValueError("candidate_query_mode must be 'full' or 'target_phrase'")
     if not isinstance(config.get("answer_question", True), bool):
         raise ValueError("answer_question must be a boolean")
-    for flag in ("require_verified_answer", "strict_fallback_limit", "structured_query", "part_refinement", "comparative_reranking"):
+    for flag in ("require_verified_answer", "strict_fallback_limit", "structured_query", "part_refinement", "comparative_reranking", "grounding_dino_fallback"):
         if not isinstance(config.get(flag, True), bool):
             raise ValueError(f"{flag} must be a boolean")
     if config.get("answer_view", "legacy_crop") not in {"marked_detail", "legacy_crop"}:
         raise ValueError("answer_view must be marked_detail or legacy_crop")
-    for name in ("finalization_reserve", "max_part_detector_calls", "part_candidate_limit"):
+    for name in ("finalization_reserve", "max_part_detector_calls", "part_candidate_limit", "max_fallback_detector_calls"):
         value = config.get(name, 0)
         if type(value) is not int or value < 0:
             raise ValueError(f"{name} must be a nonnegative integer")
@@ -159,6 +166,12 @@ def _validate_candidate_settings(config: SearchConfig) -> None:
         raise ValueError("part_refinement requires structured_query")
     if type(config.get("rerank_candidate_limit", 5)) is not int or not 1 <= config.get("rerank_candidate_limit", 5) <= 5:
         raise ValueError("rerank_candidate_limit must be an integer in [1, 5]")
+    for name in ("fallback_threshold", "fallback_text_threshold", "recovery_promising_score"):
+        value = config.get(name, .25)
+        if not math.isfinite(value) or not 0 <= value <= 1:
+            raise ValueError(f"{name} must be in [0, 1]")
+    if type(config.get("fallback_proposal_limit", 8)) is not int or config.get("fallback_proposal_limit", 8) < 1:
+        raise ValueError("fallback_proposal_limit must be a positive integer")
     answer_padding = config.get("answer_context_padding", 384)
     if type(answer_padding) is not int or answer_padding < 0:
         raise ValueError("answer_context_padding must be a nonnegative integer")

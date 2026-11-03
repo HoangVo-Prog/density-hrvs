@@ -198,6 +198,13 @@ class SlicClusters(SlicClusterAssignments):
 
 
 class SearchConfig(TypedDict):
+    grounding_dino_fallback: NotRequired[bool]
+    max_fallback_detector_calls: NotRequired[int]
+    fallback_cache_dir: NotRequired[str | None]
+    fallback_threshold: NotRequired[float]
+    fallback_text_threshold: NotRequired[float]
+    fallback_proposal_limit: NotRequired[int]
+    recovery_promising_score: NotRequired[float]
     comparative_reranking: NotRequired[bool]
     rerank_candidate_limit: NotRequired[int]
     structured_query: NotRequired[bool]
