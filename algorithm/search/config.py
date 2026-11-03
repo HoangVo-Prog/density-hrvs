@@ -72,7 +72,7 @@ def default_search_config() -> SearchConfig:
         "require_verified_answer": True,
         "strict_fallback_limit": True,
         "answer_context_padding": 384,
-        "answer_view": "marked_detail",
+        "answer_view": "legacy_crop",
     }
 
 
@@ -142,7 +142,7 @@ def _validate_candidate_settings(config: SearchConfig) -> None:
     for flag in ("require_verified_answer", "strict_fallback_limit"):
         if not isinstance(config.get(flag, True), bool):
             raise ValueError(f"{flag} must be a boolean")
-    if config.get("answer_view", "marked_detail") not in {"marked_detail", "legacy_crop"}:
+    if config.get("answer_view", "legacy_crop") not in {"marked_detail", "legacy_crop"}:
         raise ValueError("answer_view must be marked_detail or legacy_crop")
     answer_padding = config.get("answer_context_padding", 384)
     if type(answer_padding) is not int or answer_padding < 0:

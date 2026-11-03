@@ -59,7 +59,7 @@ def answer_top_region(state: RunState, result: SearchResult) -> FinalAnswer | No
     x1, y1, x2, y2 = crop_bbox
     if x2 - x1 < 2 or y2 - y1 < 2:
         return None
-    view_type = state.settings.get("answer_view", "marked_detail")
+    view_type = state.settings.get("answer_view", "legacy_crop")
     evidence = None
     if view_type == "marked_detail":
         evidence_answerer = getattr(state.local_scorer, "answer_evidence", None)

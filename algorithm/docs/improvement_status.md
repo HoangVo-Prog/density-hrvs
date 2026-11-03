@@ -9,7 +9,7 @@ The authoritative baseline is commit `1ce161b`. Existing benchmark artifacts are
 |---|---|---|
 | 0 | Frozen source/JSON evidence, independently checked metrics, diagnostic selection | Verified on all 134 questions; 408 evidence/source files frozen and hashed |
 | 1 | Fallback cap, physical generation accounting, acceptance eligibility, partial evidence | Implemented; 10 targeted tests pass |
-| 2 | Marked context and clean enlarged answer detail; frozen-box GPU comparison | Implemented; 12 tests pass; four-case paired GPU pilot complete |
+| 2 | Marked context and clean enlarged answer detail; frozen-box GPU comparison | Implemented; 12 tests pass; full 134-case paired GPU experiment complete; opt-in |
 | 3 | Structured entity/part/anchor resolver and linked boxes | Pending |
 | 4 | Instance-aware grouping and comparative reranking | Pending |
 | 5 | Bounded crop recovery and Grounding DINO fallback | Pending |
@@ -49,3 +49,14 @@ metric penalizes sentences and is deliberately conservative; do not equate it wi
 saved semantic rubric. Peak allocated GPU memory was approximately 4.3 GiB.
 Pilot artifacts: `/media/tinhanhnguyen/sub/outputs/algo1_improve/phase2_pilot`.
 The new answer view is switchable with `answer_view=legacy_crop|marked_detail`.
+
+Full Phase 2 experiment: `/media/tinhanhnguyen/sub/outputs/algo1_improve/phase2_full`.
+All 134 questions were run with frozen existing top boxes, both views, the same cached Qwen
+revision, and the same runtime. Exact-complete-answer diagnostic: legacy 33/134 versus
+marked detail 29/134. An additional literal normalized GT-phrase containment diagnostic:
+legacy 48/134 versus marked detail 43/134; among the 45 originally localized questions,
+25/45 versus 24/45. These diagnostics are not the inherited semantic rubric and require
+adjudication for synonyms and sentence wording. The new view increased abstentions (38 to 51).
+It improves particular part-reading cases but regresses others; `answer_view=legacy_crop`
+therefore remains the default. No overall accuracy improvement is claimed. Structured part
+binding and further controlled evidence experiments remain necessary.
