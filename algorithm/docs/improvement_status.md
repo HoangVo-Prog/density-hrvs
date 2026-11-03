@@ -13,7 +13,7 @@ The authoritative baseline is commit `1ce161b`. Existing benchmark artifacts are
 | 3 | Structured entity/part/anchor resolver and linked boxes | Implemented opt-in; 19 tests pass; native GPU probes complete; no quality gain established |
 | 4 | Instance-aware grouping and comparative reranking | Implemented opt-in; 23 tests pass; 134-case GPU evaluation complete; 41 localized versus baseline 45; keep off |
 | 5 | Bounded crop recovery and Grounding DINO fallback | Bounded fallback implemented opt-in; 26 tests pass; native detector and integration probes complete; expanded-crop retry pending |
-| 6 | Matched-budget controller and partition ablations | Pending |
+| 6 | Matched-budget controller and partition ablations | BFS/spatial controls implemented; 28 tests pass; native matched-budget matrix pending |
 | 7 | Optional same-instance consensus experiment | Pending |
 
 Each stage will be committed separately after relevant checks. Implementation and measured model
@@ -128,3 +128,20 @@ current root SAM3 is nonempty), but does not localize the evaluation target. A c
 empty-SAM integration uses native Grounding DINO and Qwen, with RGB features solely for
 plumbing; it is explicitly not a detector-quality benchmark. Expanded overlapping crop
 retry and broad accuracy evaluation remain pending. All fallback features stay opt-in.
+
+
+Phase 6 support: `strategy=bfs|greedy|uct|agent-uct` and
+`partition_mode=spatial|semantic`. BFS uses the globally shallowest active frontier and
+then node ID; spatial mode uses configurable overlapping quadrants and does not load or
+invoke DINO. Default behavior stays semantic Agent-UCT. Feature encoder and primary/fallback
+detector calls are recorded separately from physical Qwen generations. Tests establish
+selection order and absence of DINO calls in spatial mode, not algorithm superiority.
+Native comparisons must hold the model version, generation cap, proposal/verification
+settings, partition depth and answer/reranker configuration fixed and report wall time
+alongside all model-call counts. No UCT usefulness claim is supported yet.
+
+User-authorized larger-model experiment: official Qwen3-VL-8B-Instruct (the family has 8B,
+not 7B), pinned revision `0c351dd01ed87e9c1b53cbc748cba10e6187ff3b`, downloaded to
+`/media/tinhanhnguyen/sub/model_cache`. An isolated NF4 double-quantized bfloat16 GPU smoke
+answers a synthetic red image correctly, with peak allocation about 6.15 GiB. This confirms
+standalone feasibility, not task quality or coexistence with every other loaded model.

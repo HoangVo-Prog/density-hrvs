@@ -249,6 +249,17 @@ def _select_path(
     estimate: CostEstimator,
     on_event: EventSink,
 ) -> tuple[list[int], Selection]:
+    if config["strategy"] == "bfs":
+        frontier = [node for node in nodes if not node["children"] and not node["exhausted"]]
+        chosen = min(frontier, key=lambda n: (n["depth"], n["node_id"]))
+        path = [chosen["node_id"]]
+        while nodes[path[-1]]["parent_id"] >= 0:
+            path.append(nodes[path[-1]]["parent_id"])
+        path.reverse()
+        on_event("branch_selected", "Breadth-first: shallowest frontier, then lowest node ID.",
+                 {"node_id": chosen["node_id"], "path": path, "strategy": "bfs"})
+        return path, {"quality": 0., "exploration_bonus": 0.,
+                      "estimated_remaining_seconds": estimate(chosen), "selection_index": 0.}
     path = [0]
     selection: Selection = {
         "quality": 0.0,

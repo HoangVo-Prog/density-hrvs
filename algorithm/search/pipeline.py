@@ -24,7 +24,7 @@ from ..core.imaging import to_pil_rgb
 from ..reporting.artifacts import save_node_detections, save_node_input
 from .candidates import verify_candidates, verify_region_candidates
 from .evaluation import assess_region, detect_region, placeholder_rating
-from .partitioning import semantic_children
+from .partitioning import semantic_children, spatial_children, _should_skip_split
 from .region_scoring import (
     aggregate_verified_region,
     candidate_score,
@@ -38,11 +38,18 @@ def split_node(state: RunState, node: SearchNode) -> list[ChildRegion]:
     """Partition a node once, prepending discovered seeds at the root."""
     if node["node_id"] not in state.split_cache:
         tick = time.perf_counter()
-        semantic = semantic_children(
+        def counted_features(pixels):
+            state.usage["feature_encoder_calls"] = state.usage.get("feature_encoder_calls", 0) + 1
+            return state.feature_extractor(pixels)
+        if state.settings.get("partition_mode", "semantic") == "spatial":
+            semantic = [] if _should_skip_split(node, state.settings, state.on_event) else spatial_children(
+                node, state.settings.get("spatial_overlap", .1))
+        else:
+            semantic = semantic_children(
             state.rgb,
             node,
             state.settings,
-            state.feature_extractor,
+            counted_features,
             state.node_folder(node["node_id"]),
             state.on_event,
         )

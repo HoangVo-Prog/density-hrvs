@@ -51,12 +51,13 @@ def _tight_child(mask: NDArray[np.bool_], parent: ChildRegion) -> ChildRegion:
     }
 
 
-def spatial_children(node: ChildRegion) -> list[ChildRegion]:
+def spatial_children(node: ChildRegion, overlap: float = 0.) -> list[ChildRegion]:
     """Partition active pixels into nonempty quadrants if semantic splitting stalls."""
     height, width = node["mask"].shape
     children: list[ChildRegion] = []
-    for y1, y2 in ((0, height // 2), (height // 2, height)):
-        for x1, x2 in ((0, width // 2), (width // 2, width)):
+    margin_y, margin_x = round(height*overlap), round(width*overlap)
+    for y1, y2 in ((0, min(height,height//2+margin_y)), (max(0,height//2-margin_y), height)):
+        for x1, x2 in ((0, min(width,width//2+margin_x)), (max(0,width//2-margin_x), width)):
             mask = node["mask"][y1:y2, x1:x2].copy()
             if mask.any() and int(mask.sum()) < int(node["mask"].sum()):
                 px, py, _, _ = node["bbox"]

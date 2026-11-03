@@ -203,7 +203,9 @@ def main() -> None:
         f"Loading shared models for {len(questions)} questions; workers={args.workers}",
         flush=True,
     )
-    dino, dino_processor = load_dinov3()
+    dino = dino_processor = None
+    if settings.get("partition_mode", "semantic") == "semantic":
+        dino, dino_processor = load_dinov3()
     qwen = load_qwen_scorer()
     sam, sam_processor = load_sam3_model()
     gpu_lock = threading.Lock()

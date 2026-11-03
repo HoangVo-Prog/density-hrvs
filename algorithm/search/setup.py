@@ -138,6 +138,10 @@ def _load_feature_extractor(
     progress: Callable[[str], None],
     on_event: EventSink,
 ) -> FeatureExtractor:
+    if settings.get("partition_mode", "semantic") == "spatial":
+        def unused_features(pixels):
+            raise RuntimeError("Spatial partitioning must not invoke DINO")
+        return unused_features
     progress("Loading pinned DINOv3 checkpoint.")
     on_event(
         "model_loading",

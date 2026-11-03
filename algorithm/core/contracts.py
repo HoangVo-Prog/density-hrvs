@@ -198,6 +198,8 @@ class SlicClusters(SlicClusterAssignments):
 
 
 class SearchConfig(TypedDict):
+    partition_mode: NotRequired[str]
+    spatial_overlap: NotRequired[float]
     grounding_dino_fallback: NotRequired[bool]
     max_fallback_detector_calls: NotRequired[int]
     fallback_cache_dir: NotRequired[str | None]
@@ -218,7 +220,7 @@ class SearchConfig(TypedDict):
     strict_fallback_limit: NotRequired[bool]
     """Explicit controls for the bounded recursive visual search."""
 
-    strategy: Literal["agent-uct", "uct", "greedy"]  # Branch allocation rule.
+    strategy: Literal["agent-uct", "uct", "greedy", "bfs"]  # Branch allocation rule.
     device: str  # auto, cpu, or a CUDA device for both local models.
     max_api_calls: int  # Hard HTTP-attempt budget; 0 means unlimited.
     max_iterations: int  # Maximum completed/attempted frontier expansions.

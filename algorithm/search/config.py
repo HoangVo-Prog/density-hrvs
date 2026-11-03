@@ -9,6 +9,8 @@ def default_search_config() -> SearchConfig:
     """Return independent, editable defaults; 0 HTTP calls/proposals means unlimited."""
     return {
         "strategy": "agent-uct",
+        "partition_mode": "semantic",
+        "spatial_overlap": .1,
         "device": "auto",
         "max_api_calls": 32,
         "max_iterations": 100,
@@ -222,8 +224,13 @@ def _validate_thresholds(config: SearchConfig) -> None:
 
 
 def _validate_strategy(config: SearchConfig) -> None:
-    if config["strategy"] not in {"agent-uct", "uct", "greedy"}:
+    if config["strategy"] not in {"agent-uct", "uct", "greedy", "bfs"}:
         raise ValueError("Unknown search strategy.")
+    if config.get("partition_mode", "semantic") not in {"semantic", "spatial"}:
+        raise ValueError("partition_mode must be semantic or spatial")
+    overlap = config.get("spatial_overlap", .1)
+    if not math.isfinite(overlap) or not 0 <= overlap < .5:
+        raise ValueError("spatial_overlap must be in [0, .5)")
     if not config["n_segments_values"] or any(
         type(n) is not int or n < 1 for n in config["n_segments_values"]
     ):
