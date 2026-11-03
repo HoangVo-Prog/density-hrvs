@@ -96,6 +96,7 @@ def build_proposal_evidence(
     max_side: int = 1536,
     context_padding: int = 384,
     detail_padding: int = 16,
+    mark_detail: bool = True,
 ) -> ProposalEvidence:
     """Compose one model input with marked context and an enlarged target detail.
 
@@ -172,11 +173,12 @@ def build_proposal_evidence(
             py + round((y2 - box[1]) * sy),
         )
         stroke = max(2, round(max_side / 512))
-        draw.rectangle(
-            (mapped[0], mapped[1], mapped[2] - 1, mapped[3] - 1),
-            outline=target_color,
-            width=stroke,
-        )
+        if mark_detail or title.startswith("CONTEXT"):
+            draw.rectangle(
+                (mapped[0], mapped[1], mapped[2] - 1, mapped[3] - 1),
+                outline=target_color,
+                width=stroke,
+            )
         draw.text((left, gap), title, font=face, fill="white")
         return mapped, rendered.size
 
@@ -198,3 +200,11 @@ def build_proposal_evidence(
         "context_target_bbox": context_target,
         "detail_target_bbox": detail_target,
     }
+
+
+def build_answer_evidence(original: Image.Image, bbox: BoundingBox, *,
+                          max_side: int = 1536, context_padding: int = 384,
+                          detail_padding: int = 16) -> ProposalEvidence:
+    """Mark identity only in context; preserve original color pixels in detail."""
+    return build_proposal_evidence(original, bbox, max_side=max_side,
+        context_padding=context_padding, detail_padding=detail_padding, mark_detail=False)

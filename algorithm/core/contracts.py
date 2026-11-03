@@ -193,6 +193,7 @@ class SlicClusters(SlicClusterAssignments):
 
 
 class SearchConfig(TypedDict):
+    answer_view: NotRequired[str]
     require_verified_answer: NotRequired[bool]
     strict_fallback_limit: NotRequired[bool]
     """Explicit controls for the bounded recursive visual search."""
@@ -382,6 +383,10 @@ class SearchUsage(TypedDict):
 class FinalAnswer(TypedDict):
     """Text answer generated from the original question and the top-ranked region."""
 
+    view_type: NotRequired[str]
+    selected_candidate_id: NotRequired[str]
+    evidence_info: NotRequired[dict]
+    input_pixels: NotRequired[NDArray[np.uint8]]
     question: str  # Original user/dataset question, not the rewritten search query.
     answer: str  # Short natural-language answer grounded in the selected crop.
     bbox: BoundingBox  # Top-1 proposal in original-image coordinates.

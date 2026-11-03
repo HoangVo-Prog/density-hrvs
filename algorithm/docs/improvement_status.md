@@ -9,7 +9,7 @@ The authoritative baseline is commit `1ce161b`. Existing benchmark artifacts are
 |---|---|---|
 | 0 | Frozen source/JSON evidence, independently checked metrics, diagnostic selection | Verified on all 134 questions; 408 evidence/source files frozen and hashed |
 | 1 | Fallback cap, physical generation accounting, acceptance eligibility, partial evidence | Implemented; 10 targeted tests pass |
-| 2 | Marked context and clean enlarged answer detail; frozen-box GPU comparison | Pending |
+| 2 | Marked context and clean enlarged answer detail; frozen-box GPU comparison | Implemented; 12 tests pass; four-case paired GPU pilot complete |
 | 3 | Structured entity/part/anchor resolver and linked boxes | Pending |
 | 4 | Instance-aware grouping and comparative reranking | Pending |
 | 5 | Bounded crop recovery and Grounding DINO fallback | Pending |
@@ -39,3 +39,13 @@ Calling it again verifies the snapshot rather than overwriting it.
 Verified snapshot: `/media/tinhanhnguyen/sub/outputs/algo1_improve/baseline`; diagnostic selection: 37 questions, including all 26 joint passes. GPU: RTX 3080 Ti, 12 GB, accessible outside the sandbox.
 
 Phase 1: fallback 0/1/3 and remaining-budget checks pass; rejected/unchecked candidates cannot answer; repairs charge before each generation; partial completed checks survive interruption without node reward backup. Behavioral comparison switches: `require_verified_answer` and `strict_fallback_limit`. Physical accounting remains accurate for every configuration. GPU model imports verified (CUDA available).
+
+Phase 2 GPU pilot: same frozen boxes and same model/runtime for both views, on 0288_q01,
+0411_q01, 0719_q01 and 2783_q01. Marked detail changes the backpack answer from Uncertain
+to green (label requires Neon green), trousers from Uncertain to beige (label Khaki),
+and white trousers from blue to white. The existing red-shirt case remains correct.
+These observations are not a full accuracy estimate. The tool's exact-complete-answer
+metric penalizes sentences and is deliberately conservative; do not equate it with the
+saved semantic rubric. Peak allocated GPU memory was approximately 4.3 GiB.
+Pilot artifacts: `/media/tinhanhnguyen/sub/outputs/algo1_improve/phase2_pilot`.
+The new answer view is switchable with `answer_view=legacy_crop|marked_detail`.

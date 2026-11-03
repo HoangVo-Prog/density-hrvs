@@ -5,11 +5,15 @@ import json
 from ..core.contracts import BoundingBox, FinalAnswer, SearchResult
 from ..models.qwen_scoring import (
     ANSWER_PROMPT,
+    EVIDENCE_ANSWER_PROMPT,
     QWEN_MODEL,
     QWEN_REVISION,
     clean_answer,
 )
 from .runtime import RunState
+import numpy as np
+from PIL import Image
+from ..models.evidence import build_answer_evidence, evidence_info
 from .eligibility import eligible_regions
 from ..core.calls import invoke_counted
 
@@ -55,13 +59,32 @@ def answer_top_region(state: RunState, result: SearchResult) -> FinalAnswer | No
     x1, y1, x2, y2 = crop_bbox
     if x2 - x1 < 2 or y2 - y1 < 2:
         return None
-    crop = state.source_image.crop(crop_bbox)
-    prompt = ANSWER_PROMPT.format(question=json.dumps(state.question))
+    view_type = state.settings.get("answer_view", "marked_detail")
+    evidence = None
+    if view_type == "marked_detail":
+        evidence_answerer = getattr(state.local_scorer, "answer_evidence", None)
+        if not callable(evidence_answerer):
+            raise ValueError("marked_detail requires an answer_evidence callable")
+        answerer = evidence_answerer
+        evidence = build_answer_evidence(state.source_image, best["bbox"],
+            max_side=state.settings.get("verification_max_side", 1536),
+            context_padding=padding, detail_padding=state.settings.get("detail_padding", 16))
+        crop = Image.fromarray(evidence["image"])
+        crop_bbox = evidence["context_bbox"]
+        template = EVIDENCE_ANSWER_PROMPT
+    else:
+        crop = state.source_image.crop(crop_bbox)
+        template = ANSWER_PROMPT
+    prompt = template.format(question=json.dumps(state.question))
     raw = invoke_counted(answerer, crop, state.question, on_request=state.charge_answer)
     if not isinstance(raw, str):
         raise ValueError("answerer returned a non-string")
     answer = clean_answer(raw)
     return {
+        "view_type": view_type,
+        "selected_candidate_id": f"node_{best.get('cluster_id', 'unknown')}:candidate_{best.get('candidate_rank', 'unknown')}",
+        "evidence_info": evidence_info(evidence) if evidence is not None else {},
+        "input_pixels": np.asarray(crop),
         "question": state.question,
         "answer": answer,
         "bbox": best["bbox"],

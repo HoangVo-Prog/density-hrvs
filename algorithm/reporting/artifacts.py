@@ -139,10 +139,14 @@ def save_search_result(
     if result.get("warnings"):
         report["warnings"] = result.get("warnings", [])
     if "final_answer" in result:
-        final = result["final_answer"]
+        final = dict(result["final_answer"])
         source = to_pil_rgb(image)
         answer_path = "final_answer_region.png"
-        source.crop(final["crop_bbox"]).save(output / answer_path)
+        pixels = final.pop("input_pixels", None)
+        if pixels is not None:
+            to_pil_rgb(pixels).save(output / answer_path)
+        else:
+            source.crop(final["crop_bbox"]).save(output / answer_path)
         final["image_path"] = answer_path
         report["final_answer"] = final
     np.savez_compressed(output / "masks.npz", allow_pickle=False, **masks)
