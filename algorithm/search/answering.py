@@ -10,6 +10,8 @@ from ..models.qwen_scoring import (
     clean_answer,
 )
 from .runtime import RunState
+from .eligibility import eligible_regions
+from ..core.calls import invoke_counted
 
 
 def padded_bbox(
@@ -43,7 +45,11 @@ def answer_top_region(state: RunState, result: SearchResult) -> FinalAnswer | No
     if not callable(answerer):
         return None
 
-    best = result["ranked_regions"][0]
+    eligible = eligible_regions(result["ranked_regions"], state.settings)
+    if not eligible:
+        result["abstention"] = {"answer": "Uncertain", "reason": "no_verified_candidate"}
+        return None
+    best = eligible[0]
     padding = state.settings.get("answer_context_padding", 384)
     crop_bbox = padded_bbox(best["bbox"], state.source_image.size, padding)
     x1, y1, x2, y2 = crop_bbox
@@ -51,8 +57,7 @@ def answer_top_region(state: RunState, result: SearchResult) -> FinalAnswer | No
         return None
     crop = state.source_image.crop(crop_bbox)
     prompt = ANSWER_PROMPT.format(question=json.dumps(state.question))
-    state.usage["local_score_calls"] = state.usage.get("local_score_calls", 0) + 1
-    raw = answerer(crop, state.question)
+    raw = invoke_counted(answerer, crop, state.question, on_request=state.charge_answer)
     if not isinstance(raw, str):
         raise ValueError("answerer returned a non-string")
     answer = clean_answer(raw)

@@ -19,6 +19,7 @@ from ..core.contracts import (
 )
 from ..core.diagnostics import stage_index
 from ..core.geometry import box_iou
+from ..core.errors import LocalBudgetExceeded
 from ..core.imaging import to_pil_rgb
 from ..reporting.artifacts import save_node_detections, save_node_input
 from .candidates import verify_candidates, verify_region_candidates
@@ -269,15 +270,25 @@ def evaluate_candidates(
                 "boxes_before_nms": len(detections),
             },
         )
-    if distinct:
-        if state.settings.get("verification_mode", "region") == "region":
-            checks = verify_region_candidates(state, node, distinct, pixels, folder)
-            if checks is None:
+    try:
+        if distinct:
+            if state.settings.get("verification_mode", "region") == "region":
+                checks = verify_region_candidates(state, node, distinct, pixels, folder)
+                if checks is None:
+                    checks = verify_candidates(state, node, distinct, folder)
+            else:
                 checks = verify_candidates(state, node, distinct, folder)
         else:
-            checks = verify_candidates(state, node, distinct, folder)
-    else:
-        checks = []
+            checks = []
+    except LocalBudgetExceeded:
+        checks = state.checked_cache.get(node["node_id"], [])
+        components = aggregate_verified_region(distinct, checks, state.settings)
+        proposals = _candidate_proposals(state, node, distinct, checks, components)
+        register_proposals(state, proposals)
+        save_node_detections(pixels, detections, distinct, components, folder, checks=checks)
+        state.on_event("partial_evidence_retained", "Retain completed checks without backing up an incomplete node reward.",
+                       {"node_id": node["node_id"], "candidate_checks": len(checks)})
+        raise
     state.checked_cache[node["node_id"]] = checks
     components = aggregate_verified_region(distinct, checks, state.settings)
     components["raw_box_count"] = len(detections)

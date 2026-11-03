@@ -193,6 +193,8 @@ class SlicClusters(SlicClusterAssignments):
 
 
 class SearchConfig(TypedDict):
+    require_verified_answer: NotRequired[bool]
+    strict_fallback_limit: NotRequired[bool]
     """Explicit controls for the bounded recursive visual search."""
 
     strategy: Literal["agent-uct", "uct", "greedy"]  # Branch allocation rule.
@@ -366,6 +368,10 @@ class SearchUsage(TypedDict):
     local_score_calls: NotRequired[
         int
     ]  # Physical local Qwen generations, including repairs.
+    search_generations: NotRequired[int]
+    physical_generations: NotRequired[int]
+    generation_counts: NotRequired[dict[str, int]]
+    logical_score_requests: NotRequired[int]
     local_prompt_calls: NotRequired[int]  # Local Qwen text-only SAM3 prompt rewrites.
     candidate_checks: NotRequired[int]  # Candidate evidence sheets verified by Qwen.
     gated_regions: NotRequired[
@@ -390,6 +396,7 @@ class FinalAnswer(TypedDict):
 
 
 class SearchResult(TypedDict):
+    abstention: NotRequired[dict[str, str]]
     """Search evidence and trace; arrays are excluded from the JSON summary."""
 
     query: str
@@ -461,6 +468,8 @@ class ProposalReport(ClusterReport):
 
 
 class SearchReport(TypedDict):
+    schema_version: NotRequired[int]
+    abstention: NotRequired[dict[str, str]]
     """results.json schema; all paths are relative to the output directory."""
 
     query: str

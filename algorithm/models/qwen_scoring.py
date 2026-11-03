@@ -10,6 +10,7 @@ from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 
 from ..core.contracts import CandidatePrompt, RegionAssessment, VerifierScore
 from ..core.errors import InvalidScoreResponse
+from ..core.calls import generate_rating
 from .scoring import (
     CONTEXT_INSTRUCTIONS,
     SCORING_PROMPT,
@@ -207,18 +208,20 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
         )[0]
 
     @torch.inference_mode()
-    def rewrite(query: str, concept: str) -> str:
+    def rewrite(query: str, concept: str, *, on_request: Callable = _ignore_request) -> str:
         target = concept.strip()
         if not target:
             return ""
         prompt = SAM_PROMPT_REWRITE_PROMPT.format(
             concept=target, query=json.dumps(query)
         )
+        on_request()
         return clean_sam_prompt(_generate_text(prompt, 64))
 
     @torch.inference_mode()
-    def resolve(query: str) -> str:
+    def resolve(query: str, *, on_request: Callable = _ignore_request) -> str:
         prompt = TARGET_RESOLVER_PROMPT.format(query=json.dumps(query))
+        on_request()
         return clean_sam_prompt(_generate_text(prompt, 32))
 
     @torch.inference_mode()
@@ -234,26 +237,14 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
             + SCORING_PROMPT
             + json.dumps(query)
         )
-        replies: list[str] = []
-        on_request()
-        for attempt in range(2):
-            text = _generate_image_text(image, prompt, 256)
-            replies.append(text)
-            try:
-                rating = parse_verifier_score(text)
-                return {
-                    **rating,
-                    "model_id": QWEN_MODEL,
-                    "raw_response": text,
-                    "prompt": prompt,
-                    "input_size": image.size,
-                    "model_revision": QWEN_REVISION,
-                }
-            except ValueError:
-                if attempt:
-                    raise InvalidScoreResponse(replies) from None
-                prompt += '\nReturn only valid JSON, for example {"answer":"Uncertain","score":30,"reason":"Required detail is unclear."}.'
-        raise RuntimeError("Local Qwen scoring failed")
+        rating, text, final_prompt = generate_rating(
+            lambda current: _generate_image_text(image, current, 256),
+            parse_verifier_score, prompt, on_request,
+            'Return only valid JSON, for example {"answer":"Uncertain","score":30,"reason":"Required detail is unclear."}.',
+        )
+        return {**rating, "model_id": QWEN_MODEL, "raw_response": text,
+                "prompt": final_prompt, "input_size": image.size,
+                "model_revision": QWEN_REVISION}
 
     @torch.inference_mode()
     def score_candidates(
@@ -269,34 +260,19 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
             query=json.dumps(query),
         )
         expected = [candidate["index"] for candidate in candidates]
-        replies: list[str] = []
-        on_request()
-        for attempt in range(2):
-            text = _generate_image_text(image, prompt, 512)
-            replies.append(text)
-            try:
-                assessment = parse_region_assessment(text, expected)
-                return {
-                    "ranking": assessment["ranking"],
-                    "best_index": assessment["best_index"],
-                    "ambiguous": assessment["ambiguous"],
-                    "ratings": {
-                        index: {
-                            **rating,
-                            "model_id": QWEN_MODEL,
-                            "raw_response": text,
-                            "prompt": prompt,
-                            "input_size": image.size,
-                            "model_revision": QWEN_REVISION,
-                        }
-                        for index, rating in assessment["ratings"].items()
-                    },
-                }
-            except ValueError:
-                if attempt:
-                    raise InvalidScoreResponse(replies) from None
-                prompt += "\nReturn only valid JSON with a full ranking and every candidate index exactly once."
-        raise RuntimeError("Local Qwen candidate scoring failed")
+        assessment, text, final_prompt = generate_rating(
+            lambda current: _generate_image_text(image, current, 512),
+            lambda reply: parse_region_assessment(reply, expected), prompt, on_request,
+            "Return only valid JSON with a full ranking and every candidate index exactly once.",
+        )
+        return {
+            "ranking": assessment["ranking"], "best_index": assessment["best_index"],
+            "ambiguous": assessment["ambiguous"],
+            "ratings": {index: {**rating, "model_id": QWEN_MODEL,
+                       "raw_response": text, "prompt": final_prompt,
+                       "input_size": image.size, "model_revision": QWEN_REVISION}
+                       for index, rating in assessment["ratings"].items()},
+        }
 
     @torch.inference_mode()
     def answer(

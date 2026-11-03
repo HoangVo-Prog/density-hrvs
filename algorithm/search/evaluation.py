@@ -31,6 +31,7 @@ def score_crop(
             {"node_id": state.context.node_id, "usage": state.usage.copy()},
         )
         return state.score_cache[key]
+    state.usage["logical_score_requests"] = state.usage.get("logical_score_requests", 0) + 1
     tick = time.perf_counter()
     try:
         if state.custom_scorer is None:

@@ -17,7 +17,7 @@ from ..core.contracts import (
     SearchNode,
 )
 from ..core.diagnostics import stage_index
-from ..core.errors import InvalidScoreResponse
+from ..core.errors import InvalidScoreResponse, LocalBudgetExceeded
 from ..core.imaging import clamp_global_box, to_pil_rgb
 from ..models.evidence import (
     build_proposal_evidence,
@@ -200,6 +200,9 @@ def verify_candidate(
             "candidate_score": fused,
         },
     )
+    cache = state.checked_cache.setdefault(node["node_id"], [])
+    cache[:] = [old for old in cache if old["detection_index"] != check["detection_index"]]
+    cache.append(check)
     return check
 
 
@@ -237,6 +240,8 @@ def verify_selected_candidates(
     """Verify selected detections with per-candidate context/detail sheets."""
     checks: list[CandidateCheck] = []
     for index in sorted(set(indices)):
+        if state.remaining_generations() == 0:
+            raise LocalBudgetExceeded("No budget remains for candidate detail inspection")
         if not 0 <= index < len(distinct):
             continue
         check = verify_candidate(state, node, distinct[index], index + 1, folder)
@@ -298,6 +303,7 @@ def verify_region_candidates(
         },
     )
     tick = time.perf_counter()
+    state.usage["logical_score_requests"] = state.usage.get("logical_score_requests", 0) + 1
     try:
         assessment = verifier(
             sheet,
@@ -318,7 +324,11 @@ def verify_region_candidates(
                 )
             )
             stage_index(folder)
-        fallback_indices = list(range(min(fallback_limit, len(distinct))))
+        remaining = state.remaining_generations()
+        cap = min(fallback_limit, len(distinct))
+        if remaining is not None:
+            cap = min(cap, remaining)
+        fallback_indices = list(range(cap))
         fallback_checks = verify_selected_candidates(
             state, node, distinct, fallback_indices, folder
         )
@@ -388,8 +398,13 @@ def verify_region_candidates(
                 selected = assessment["ranking"][:fallback_limit]
         else:
             selected = assessment["ranking"][:fallback_limit]
-        fallback_indices = [index - 1 for index in selected[: max(limit, 1)]]
+        cap = fallback_limit if state.settings.get("strict_fallback_limit", True) else max(limit, 1)
+        remaining = state.remaining_generations()
+        if remaining is not None:
+            cap = min(cap, remaining)
+        fallback_indices = [index - 1 for index in selected[:cap]]
 
+    state.checked_cache[node["node_id"]] = list(region_checks.values())
     merged = dict(region_checks)
     if fallback_indices:
         for check in verify_selected_candidates(

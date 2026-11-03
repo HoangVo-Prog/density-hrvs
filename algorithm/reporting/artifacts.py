@@ -121,6 +121,7 @@ def save_search_result(
             proposal_report["evidence_info"] = evidence_info(view)
         proposals.append(proposal_report)
     report: SearchReport = {
+        "schema_version": 2,
         "query": result["query"],
         "image_size": to_pil_rgb(image).size,
         "config": result["config"],
@@ -133,6 +134,8 @@ def save_search_result(
         "clusters": clusters,
         "proposals": proposals,
     }
+    if result.get("abstention"):
+        report["abstention"] = result["abstention"]
     if result.get("warnings"):
         report["warnings"] = result.get("warnings", [])
     if "final_answer" in result:

@@ -25,6 +25,7 @@ from ..core.contracts import (
     VerifierScore,
 )
 from ..core.errors import APIBudgetExceeded, LocalBudgetExceeded
+from ..core.calls import charge_generation
 from ..core.events import EventSink, ignore_event
 from ..models.scoring import ScoringView
 
@@ -106,11 +107,18 @@ class RunState:
 
     def charge_local(self) -> None:
         """Bill one local generation or raise before running it."""
-        count = self.usage.get("local_score_calls", 0)
+        charge_generation(self.usage, "verification", self.settings.get("max_local_scores", 32))
+
+    def charge_answer(self) -> None:
+        """The post-search answer is outside the search budget, but still counted."""
+        charge_generation(self.usage, "answer")
+
+    def remaining_generations(self) -> int | None:
         budget = self.settings.get("max_local_scores", 32)
-        if budget and count >= budget:
-            raise LocalBudgetExceeded("Local generation budget exhausted")
-        self.usage["local_score_calls"] = count + 1
+        if not budget:
+            return None
+        used = self.usage.get("search_generations", self.usage.get("local_score_calls", 0))
+        return max(0, budget - used)
 
     def node_folder(self, node_id: int) -> Path | None:
         """Return the optional per-node artifact directory."""

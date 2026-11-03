@@ -10,6 +10,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..core.contracts import SAM3Detection, SearchConfig, SearchUsage
+from ..core.calls import charge_generation, invoke_counted
 from ..core.events import EventSink, SAM3CandidateRecord
 from ..core.imaging import to_pil_rgb
 from ..models.qwen_scoring import LocalScorer, load_qwen_scorer
@@ -53,10 +54,10 @@ def _resolve_sam_prompt(
     source = "target_resolver"
     try:
         if callable(resolver):
-            resolved = resolver(query)
+            resolved = invoke_counted(resolver, query, on_request=lambda: charge_generation(usage, "resolver"))
         else:
             source = "rewrite_fallback"
-            resolved = rewriter(query, original_prompt)
+            resolved = invoke_counted(rewriter, query, original_prompt, on_request=lambda: charge_generation(usage, "resolver"))
     except Exception as exc:
         resolved = ""
         failure = f"{type(exc).__name__}: {exc}"

@@ -69,6 +69,8 @@ def default_search_config() -> SearchConfig:
         "region_box_count_cap": 5,
         "region_nms_iou": 0.7,
         "answer_question": True,
+        "require_verified_answer": True,
+        "strict_fallback_limit": True,
         "answer_context_padding": 384,
     }
 
@@ -136,6 +138,9 @@ def _validate_candidate_settings(config: SearchConfig) -> None:
         raise ValueError("candidate_query_mode must be 'full' or 'target_phrase'")
     if not isinstance(config.get("answer_question", True), bool):
         raise ValueError("answer_question must be a boolean")
+    for flag in ("require_verified_answer", "strict_fallback_limit"):
+        if not isinstance(config.get(flag, True), bool):
+            raise ValueError(f"{flag} must be a boolean")
     answer_padding = config.get("answer_context_padding", 384)
     if type(answer_padding) is not int or answer_padding < 0:
         raise ValueError("answer_context_padding must be a nonnegative integer")

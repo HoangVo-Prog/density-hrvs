@@ -21,6 +21,7 @@ from ..core.events import EventSink, ignore_event
 from ..models.qwen_scoring import LocalScorer
 from ..reporting.artifacts import save_search_result
 from .answering import answer_top_region
+from .eligibility import answer_eligible
 from .discovery import discover_seed_regions
 from .pipeline import estimate_node, evaluate_node, split_node
 from .runtime import RunState, SearchRequest
@@ -142,7 +143,7 @@ def _attach_rankings(state: RunState, result: SearchResult) -> None:
     )
     result["ranked_regions"] = sorted(
         state.observed_regions,
-        key=lambda proposal: (proposal["score"], proposal["sam3_score"] or 0.0),
+        key=lambda proposal: (answer_eligible(proposal, state.settings), proposal["score"], proposal["sam3_score"] or 0.0),
         reverse=True,
     )
 

@@ -290,7 +290,7 @@ def main() -> None:
             outcome["api_calls"] = result["usage"]["api_calls"]
             outcome["cost_usd"] = result["usage"]["reported_cost_usd"]
             outcome["local_score_calls"] = result["usage"].get("local_score_calls", 0)
-            outcome["final_answer"] = result.get("final_answer", {}).get("answer", "")
+            outcome["final_answer"] = result.get("final_answer", result.get("abstention", {})).get("answer", "")
             outcome["warnings"] = result.get("warnings", [])
             save_search_result(result, image, folder / "run")
             inspection = make_inspection(
