@@ -25,7 +25,7 @@ reference itself was not the asked-about object. That behavior is not used here.
 DINO cached full-image features, SLIC/K-means, effective adjacent merge, branching
 5, depth/iteration limits and 32 search-generation budget are retained. Top-10
 fallback is before NMS. Full per-node/K-means stage exports are enabled through
---save-stages. Selection is the same 15 images, five L1-hard/L2-medium/L3-easy;
+--save-stages. Selection is the same 15 images, five L1-easy/L2-medium/L3-hard;
 all 32 questions are included. It is a new frozen run, never overwritten results.
 
 Whole-region answerability is not precise target localization. Generic target

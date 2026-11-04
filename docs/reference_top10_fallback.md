@@ -20,4 +20,4 @@ No answers, target/reference geometry or fallback predictions are used. These
 are image density strata, not independently calibrated question difficulty.
 The selection manifest is frozen before running inference.
 
-Report naming follows the user-confirmed order: L1 = hard, L2 = medium, L3 = easy. Five images per level are sampled with seed 42.
+Report naming follows the user-confirmed order: L1 = easy, L2 = medium, L3 = hard. Five images per level are sampled with seed 42.
