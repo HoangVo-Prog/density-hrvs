@@ -20,7 +20,7 @@ import torch
 
 from ..core.calls import charge_generation
 from ..core.data import load_dataset_image
-from ..models.qwen_scoring import QWEN_MODEL, QWEN_REVISION, load_qwen_scorer
+from ..models.qwen_scoring import QWEN_MODEL, QWEN_CHECKPOINTS, load_qwen_scorer
 from ..search.answering import answer_top_region
 
 
@@ -59,14 +59,20 @@ def main() -> None:
     parser.add_argument('--max-side',type=int,default=1536)
     parser.add_argument('--views',nargs='+',choices=['legacy_crop','marked_detail'],
                         default=['legacy_crop','marked_detail'])
+    parser.add_argument('--model',default=QWEN_MODEL)
+    parser.add_argument('--model-revision')
+    parser.add_argument('--cache-dir')
+    parser.add_argument('--quantization',choices=['none','nf4'],default='none')
     args=parser.parse_args()
+    args.model_revision=args.model_revision or QWEN_CHECKPOINTS.get(args.model)
+    if not args.model_revision:raise ValueError("An explicit model revision is required")
     selection=json.loads((args.selection or args.batch/'selection.json').read_text())
     if args.question_ids:
         selection=[r for r in selection if r['question_id'] in set(args.question_ids)]
     if args.limit:selection=selection[:args.limit]
     args.output.mkdir(parents=True,exist_ok=True)
     identity={'batch':str(args.batch.resolve()), 'selection':selection,'views':args.views,
-        'model':QWEN_MODEL,'revision':QWEN_REVISION,'device':args.device,'max_side':args.max_side,
+        'model':args.model,'revision':args.model_revision,'quantization':args.quantization,'device':args.device,'max_side':args.max_side,
         'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
         'source_hashes':{str(p):hashlib.sha256(p.read_bytes()).hexdigest()
             for p in [Path(__file__),Path(__file__).parents[1]/'search/answering.py',
@@ -77,7 +83,7 @@ def main() -> None:
     if manifest.exists() and json.loads(manifest.read_text())!=identity:
         raise ValueError('Experiment identity changed; choose a new output directory')
     manifest.write_text(json.dumps(identity,indent=2)+'\n')
-    tick=time.perf_counter();scorer=load_qwen_scorer(args.device)
+    tick=time.perf_counter();scorer=load_qwen_scorer(args.device,model_id=args.model,revision=args.model_revision,cache_dir=args.cache_dir,quantization=args.quantization)
     print(f'Model ready in {time.perf_counter()-tick:.1f}s',flush=True)
     for index,item in enumerate(selection,1):
         qid=item['question_id'];folder=args.output/qid;checkpoint=folder/'prediction.json'

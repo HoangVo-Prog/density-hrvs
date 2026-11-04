@@ -12,6 +12,11 @@ def default_search_config() -> SearchConfig:
         "partition_mode": "semantic",
         "spatial_overlap": .1,
         "device": "auto",
+        "qwen_model": "Qwen/Qwen3-VL-2B-Instruct",
+        "qwen_revision": None,
+        "qwen_cache_dir": None,
+        "qwen_quantization": "none",
+        "model_residency": "resident",
         "max_api_calls": 32,
         "max_iterations": 100,
         "max_depth": 3,
@@ -241,6 +246,10 @@ def _validate_strategy(config: SearchConfig) -> None:
 
 def validate_search_config(config: SearchConfig) -> None:
     """Reject invalid budgets/scales before local model loading or API charges."""
+    if config.get("model_residency", "resident") not in {"resident", "staged"}:
+        raise ValueError("model_residency must be resident or staged")
+    if config.get("qwen_quantization", "none") not in {"none", "nf4"}:
+        raise ValueError("qwen_quantization must be none or nf4")
     _validate_region_weights(config)
     _validate_candidate_settings(config)
     _validate_budgets(config)

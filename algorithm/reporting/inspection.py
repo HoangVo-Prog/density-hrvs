@@ -13,6 +13,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from ..core.contracts import BoundingBox, ProposalReport, SearchReport
 from ..core.data import load_dataset_image
+from ..core.dataset_manifest import load_evaluation_rows
 from ..core.geometry import box_iou
 
 
@@ -60,9 +61,9 @@ COLORS = ("#ff453a", "#00bfff", "#ffae00", "#cb75ff", "#ff5ca8", "#00d4be")
 
 def model_status(proposal: ProposalReport) -> str:
     """Describe candidate and verifier roles without implying calibrated confidence."""
-    detector = f"SAM3 {proposal['sam3_score'] or 0:.3f}"
+    detector = f"SAM3 {proposal['sam3_score']:.3f}" if proposal["sam3_score"] is not None else f"{proposal.get('proposal_backend', 'box detector').rsplit('/',1)[-1]} {proposal.get('detector_score',0):.3f}"
     model_id = proposal["verifier"].get("model_id", "")
-    verifier = "Qwen3-VL-2B" if "Qwen" in model_id else model_id or "not-run"
+    verifier = model_id.rsplit("/", 1)[-1] if model_id else "not-run"
     if proposal.get("scoring_scope") == "region":
         return (
             f"{detector} | Region reward {proposal['score']:.3f} | "
@@ -257,15 +258,8 @@ def make_inspection(
     (output / "full_images").mkdir(parents=True, exist_ok=True)
     (output / "candidate_views").mkdir(exist_ok=True)
     report = cast(SearchReport, json.loads((run / "results.json").read_text()))
-    matches = []
-    for path in sorted(Path(data_dir).glob("hrvs_bbox_samples_*.json")):
-        samples = json.loads(path.read_text())
-        matches.extend(
-            row
-            for row in samples
-            if row.get("question_id") == question_id
-            and str(row.get("image_id")) == image_id
-        )
+    matches = [row for row in load_evaluation_rows(data_dir)
+               if row['question_id'] == question_id and str(row['image_id']) == image_id]
     if not matches:
         raise ValueError(f"No target annotation found for {question_id}.")
     sample = matches[0]

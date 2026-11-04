@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from ..core.calls import charge_generation
 from ..core.data import load_dataset_image
-from ..models.qwen_scoring import QWEN_REVISION, load_qwen_scorer
+from ..models.qwen_scoring import QWEN_MODEL, QWEN_CHECKPOINTS, load_qwen_scorer
 from ..search.reranking import rerank_regions
 
 
@@ -17,18 +17,24 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--batch',type=Path,required=True);p.add_argument('--data-dir',type=Path,required=True)
     p.add_argument('--output',type=Path,required=True);p.add_argument('--question-ids',nargs='*')
+    p.add_argument('--model',default=QWEN_MODEL)
+    p.add_argument('--model-revision')
+    p.add_argument('--cache-dir')
+    p.add_argument('--quantization',choices=['none','nf4'],default='none')
     args=p.parse_args();args.output.mkdir(parents=True,exist_ok=True)
+    args.model_revision=args.model_revision or QWEN_CHECKPOINTS.get(args.model)
+    if not args.model_revision:raise ValueError("An explicit model revision is required")
     selection=json.loads((args.batch/'selection.json').read_text())
     if args.question_ids:selection=[r for r in selection if r['question_id'] in set(args.question_ids)]
     files=[Path(__file__),Path(__file__).parents[1]/'search/reranking.py',
         Path(__file__).parents[1]/'models/comparison.py',Path(__file__).parents[1]/'models/qwen_scoring.py']
-    identity={'selection':selection,'batch':str(args.batch.resolve()),'revision':QWEN_REVISION,
+    identity={'selection':selection,'batch':str(args.batch.resolve()),'model':args.model,'revision':args.model_revision,'quantization':args.quantization,
         'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
         'source_hashes':{str(f):hashlib.sha256(f.read_bytes()).hexdigest() for f in files}}
     manifest=args.output/'manifest.json'
     if manifest.exists() and json.loads(manifest.read_text())!=identity:raise ValueError('Experiment identity changed')
     manifest.write_text(json.dumps(identity,indent=2)+'\n')
-    scorer=load_qwen_scorer('cuda')
+    scorer=load_qwen_scorer('cuda',model_id=args.model,revision=args.model_revision,cache_dir=args.cache_dir,quantization=args.quantization)
     for index,item in enumerate(selection,1):
         qid=item['question_id'];folder=args.output/qid;file=folder/'prediction.json'
         if file.exists():continue

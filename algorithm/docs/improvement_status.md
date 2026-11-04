@@ -14,7 +14,7 @@ The authoritative baseline is commit `1ce161b`. Existing benchmark artifacts are
 | 4 | Instance-aware grouping and comparative reranking | Implemented opt-in; 23 tests pass; 134-case GPU evaluation complete; 41 localized versus baseline 45; keep off |
 | 5 | Bounded crop recovery and Grounding DINO fallback | Bounded fallback implemented opt-in; 26 tests pass; native detector and integration probes complete; expanded-crop retry pending |
 | 6 | Matched-budget controller and partition ablations | BFS/spatial controls implemented; 28 tests pass; native matched-budget matrix pending |
-| 7 | Optional same-instance consensus experiment | Pending |
+| 7 | Optional same-instance consensus experiment | Screened on both 134-case paired view experiments; fewer exact correct answers and 2x answer requests; left off |
 
 Each stage will be committed separately after relevant checks. Implementation and measured model
 quality are tracked separately; no phase is validated by tests of another phase. Keep all 134
@@ -54,7 +54,7 @@ Full Phase 2 experiment: `/media/tinhanhnguyen/sub/outputs/algo1_improve/phase2_
 All 134 questions were run with frozen existing top boxes, both views, the same cached Qwen
 revision, and the same runtime. Exact-complete-answer diagnostic: legacy 33/134 versus
 marked detail 29/134. An additional literal normalized GT-phrase containment diagnostic:
-legacy 48/134 versus marked detail 43/134; among the 45 originally localized questions,
+legacy 49/134 versus marked detail 43/134; among the 45 originally localized questions,
 25/45 versus 24/45. These diagnostics are not the inherited semantic rubric and require
 adjudication for synonyms and sentence wording. The new view increased abstentions (38 to 51).
 It improves particular part-reading cases but regresses others; `answer_view=legacy_crop`
@@ -145,3 +145,77 @@ not 7B), pinned revision `0c351dd01ed87e9c1b53cbc748cba10e6187ff3b`, downloaded 
 `/media/tinhanhnguyen/sub/model_cache`. An isolated NF4 double-quantized bfloat16 GPU smoke
 answers a synthetic red image correctly, with peak allocation about 6.15 GiB. This confirms
 standalone feasibility, not task quality or coexistence with every other loaded model.
+
+Qwen3-VL 8B and memory staging findings:
+Coexistence test: running Qwen3-VL-8B-Instruct (4-bit NF4) alongside DINOv3 and SAM3
+exhausts the 12 GiB GPU memory when all reside simultaneously in VRAM. To resolve this,
+`model_residency="staged"` was introduced in `algorithm/models/residency.py`, which moves
+each model to CUDA when actively called and returns it to CPU afterwards.
+
+Evaluation results:
+1. Full 134-question evaluation on frozen baseline candidate crops:
+   - Comparing 2B vs 8B: exact answer matches jumped from 33/134 to 65/134, and abstentions
+     plummeted from 38 down to 15 when using legacy crop view.
+   - Marked answer views continued to regress relative to legacy crop views even with 8B,
+     confirming visual synthetic boxes distract the VLM; legacy crop view remains primary.
+2. Official dataset support (`data_official_official`):
+   - Created dataset manifest adapter supporting the 501-image / 1,060-question format
+     with direct ZIP streaming from `images.zip`.
+   - Verified load and execution on image `000.jpg` with staged Qwen3-VL 8B; completed
+     all iterations and generated predictions within GPU memory limits.
+   - All 31 regression and invariant unit tests pass.
+
+
+## Larger verifier and requested official export (2026-11-04)
+
+The official 8B checkpoint is available in the secondary-drive cache. Explicit model ID,
+revision, cache path and NF4 quantization are now configurable and saved with each answer;
+no output from an 8B scorer is labelled 2B. The comparison tools use the same frozen
+inference boxes and both answer views for either model. The 134-case paired experiment
+`qwen8_answer_full` is complete: exact normalized complete answers are legacy 65/134,
+marked-detail 57/134, versus 2B legacy 33/134 and marked 29/134. Legacy abstentions decrease
+38 -> 15; marked 51 -> 22. This is an answer-stage deployment comparison (8B NF4 versus
+2B bfloat16), not a clean parameter-count ablation or new end-to-end search result. The
+literal normalized phrase diagnostic is 49 -> 65 for legacy and 43 -> 57 for marked.
+The earlier 48 legacy diagnostic used a slightly different normalization; use the
+consistent normalized-word-boundary comparison for both models. Exact scores are not
+interchangeable with the inherited semantic rubric (baseline 53/134).
+
+Standalone 8B NF4 peak allocation is about 6.15 GiB. Keeping 8B plus both FP32 vision
+models resident fails with GPU OOM. `model_residency=staged` instead moves each model to
+the GPU for its call and offloads it afterward, preserving weights, input resolution,
+prompts and physical generation accounting. A real SAM3+DINO+8B smoke completes with
+legacy answering (0411_q02 -> green). This establishes feasible execution; its owner box
+still misses the tiny badge annotation. Tests now cover staging cleanup, model-independent
+answer evidence, both dataset formats and exact three-digit ZIP filenames (31 tests).
+
+The requested `data_official_official` contains 501 images and 1,060 questions in an
+image-record annotation export. The reader projects exactly image ID, question ID and
+question into inference; answers, box attributes, points and targets are exposed only to
+post-prediction evaluation. Its three-digit filenames are matched exactly before the
+historic four-digit fallback. Inspection labels use the actual scorer/backend identity.
+
+Content fingerprint and exact question-text checks find all 67 audited development images
+and 134 questions in this export. The additional group has 434 images and 926 questions.
+Membership is frozen in `algo1_improve/official_dataset_membership.json`; report the groups
+separately. A first-two-image native pilot was started with 8B NF4, staged residency, legacy
+answer view, 32 physical search generations, full default DINO/SLIC resolution and all
+unproven new query/part/reranking/fallback features off. One case completed successfully; the pilot was stopped at its saved checkpoint to
+finish the 8B comparative-reranking development experiment before the long official run.
+Full evaluation and the native controller matrix remain pending. The selected model configuration is based on the
+completed development comparison, not on the new dataset's answers.
+
+
+Same-instance two-view consensus screening (`model_comparison.json`) includes 127 original
+inference-accepted owners. With 8B, legacy answering produces 65 exact correct answers
+among 118 non-abstentions; agreement-only consensus produces 52 among 79 non-abstentions,
+at twice the answer-generation cost. With 2B, the corresponding exact counts are 33 -> 19.
+The two views share pixels and are not independent votes. Consensus remains off.
+
+Long-run execution support: `algorithm.tools.run_experiment` hashes dataset contents and
+configuration, saves executable source plus an archive, and always executes/resumes the
+verified frozen copy. Working-branch edits cannot silently change a running experiment.
+One-worker GPU batches now run serially so interruption exits cleanly rather than waiting
+for thread-pool work to drain. Per-question completion records include elapsed time,
+physical/search generations, primary detector and feature calls, and peak GPU allocation.
+32 regression tests pass, including source/config resume safety and dataset-input isolation.

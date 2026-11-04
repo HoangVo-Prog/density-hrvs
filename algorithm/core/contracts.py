@@ -198,6 +198,11 @@ class SlicClusters(SlicClusterAssignments):
 
 
 class SearchConfig(TypedDict):
+    model_residency: NotRequired[str]
+    qwen_model: NotRequired[str]
+    qwen_revision: NotRequired[str | None]
+    qwen_cache_dir: NotRequired[str | None]
+    qwen_quantization: NotRequired[str]
     partition_mode: NotRequired[str]
     spatial_overlap: NotRequired[float]
     grounding_dino_fallback: NotRequired[bool]

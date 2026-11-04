@@ -171,7 +171,14 @@ def clean_answer(text: str) -> str:
     return answer[:300] or "Uncertain"
 
 
-def load_qwen_scorer(device: str = "auto") -> LocalScorer:
+QWEN_8B_MODEL = "Qwen/Qwen3-VL-8B-Instruct"
+QWEN_8B_REVISION = "0c351dd01ed87e9c1b53cbc748cba10e6187ff3b"
+QWEN_CHECKPOINTS = {QWEN_MODEL: QWEN_REVISION, QWEN_8B_MODEL: QWEN_8B_REVISION}
+
+
+def load_qwen_scorer(device: str = "auto", *, model_id: str = QWEN_MODEL,
+                     revision: str | None = None, cache_dir: str | None = None,
+                     quantization: str = "none") -> LocalScorer:
     """Load cached weights once; returned callable performs no network requests."""
     selected = (
         "cuda"
@@ -180,26 +187,31 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
         if device == "auto"
         else device
     )
+    revision = revision or QWEN_CHECKPOINTS.get(model_id)
+    if not revision:
+        raise ValueError("Provide a pinned revision for a nonstandard Qwen checkpoint")
+    if quantization not in {"none", "nf4"}:
+        raise ValueError("quantization must be none or nf4")
+    if quantization == "nf4" and not selected.startswith("cuda"):
+        raise ValueError("NF4 inference requires CUDA in this runtime")
     processor = AutoProcessor.from_pretrained(
-        QWEN_MODEL, revision=QWEN_REVISION, local_files_only=True
+        model_id, revision=revision, cache_dir=cache_dir, local_files_only=True
     )
     # Bound visual tokens to keep DINOv3 and the scorer resident on a 12GB GPU.
     processor.image_processor.size = {"shortest_edge": 65536, "longest_edge": 1048576}
     # Transformers' generation mixin stubs omit attributes supplied at runtime.
-    model = (
-        cast(
-            Any,
-            Qwen3VLForConditionalGeneration.from_pretrained(
-                QWEN_MODEL,
-                revision=QWEN_REVISION,
-                local_files_only=True,
-                dtype=torch.bfloat16 if selected.startswith("cuda") else torch.float32,
-                attn_implementation="sdpa",
-            ),
-        )
-        .to(selected)
-        .eval()
-    )
+    kwargs = dict(revision=revision, cache_dir=cache_dir, local_files_only=True,
+                  dtype=torch.bfloat16 if selected.startswith("cuda") else torch.float32,
+                  attn_implementation="sdpa")
+    if quantization == "nf4":
+        from transformers import BitsAndBytesConfig
+        kwargs.update(device_map={"": selected}, quantization_config=BitsAndBytesConfig(
+            load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True))
+    model = cast(Any, Qwen3VLForConditionalGeneration.from_pretrained(model_id, **kwargs))
+    if quantization == "none":
+        model = model.to(selected)
+    model.eval()
 
     def _generate_text(prompt: str, max_new_tokens: int) -> str:
         messages = [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
@@ -278,9 +290,9 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
             parse_verifier_score, prompt, on_request,
             'Return only valid JSON, for example {"answer":"Uncertain","score":30,"reason":"Required detail is unclear."}.',
         )
-        return {**rating, "model_id": QWEN_MODEL, "raw_response": text,
+        return {**rating, "model_id": model_id, "raw_response": text,
                 "prompt": final_prompt, "input_size": image.size,
-                "model_revision": QWEN_REVISION}
+                "model_revision": revision}
 
     @torch.inference_mode()
     def score_candidates(
@@ -304,9 +316,9 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
         return {
             "ranking": assessment["ranking"], "best_index": assessment["best_index"],
             "ambiguous": assessment["ambiguous"],
-            "ratings": {index: {**rating, "model_id": QWEN_MODEL,
+            "ratings": {index: {**rating, "model_id": model_id,
                        "raw_response": text, "prompt": final_prompt,
-                       "input_size": image.size, "model_revision": QWEN_REVISION}
+                       "input_size": image.size, "model_revision": revision}
                        for index, rating in assessment["ratings"].items()},
         }
 
@@ -321,8 +333,8 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
             lambda current: _generate_image_text(image, current, 768),
             lambda reply: parse_region_assessment(reply, list(range(1, count+1))),
             prompt, on_request, "Return valid JSON and rate and rank every numbered index exactly once.")
-        assessment['ratings'] = {index: {**rating, 'model_id': QWEN_MODEL,
-            'model_revision': QWEN_REVISION, 'raw_response': text, 'prompt': final_prompt,
+        assessment['ratings'] = {index: {**rating, 'model_id': model_id,
+            'model_revision': revision, 'raw_response': text, 'prompt': final_prompt,
             'input_size': image.size} for index,rating in assessment['ratings'].items()}
         return assessment
 
@@ -352,6 +364,10 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
             on_request, "Return only valid JSON with entity_concept, part_concept, reference_concepts and scene_constraints.")
         return plan
 
+    setattr(score, "set_device", lambda target: model.to(target))
+    setattr(score, "model_id", model_id)
+    setattr(score, "model_revision", revision)
+    setattr(score, "quantization", quantization)
     setattr(score, "compare_candidates", compare_candidates)
     setattr(score, "resolve_structured", resolve_structured)
     setattr(score, "answer_evidence", answer_evidence)

@@ -6,6 +6,7 @@ import html
 import json
 from pathlib import Path
 import threading
+import torch
 from collections.abc import Callable
 from typing import NotRequired, TypedDict, cast
 
@@ -15,12 +16,14 @@ from PIL import Image
 
 from ..core.contracts import CandidatePrompt, SAM3Detection, VerifierScore
 from ..core.data import load_dataset_image
+from ..core.dataset_manifest import load_inference_questions
 from ..reporting.inspection import make_inspection
 from ..models.qwen_scoring import load_qwen_scorer
 from ..core.query import question_target
 from ..models.scoring import ScoringView, _ignore_request
 from ..models.regions import exec_dinov3_pca_on_image, load_dinov3
 from ..search.runner import run_visual_search, save_search_result
+from ..models.residency import staged_callable, staged_scorer
 from ..models.sam3 import exec_sam3_on_image, load_sam3_model
 from ..search.config import default_search_config
 
@@ -44,6 +47,12 @@ class Outcome(TypedDict):
     local_score_calls: int  # Local Qwen generations, separate from HTTP attempts.
     top1_iou: float  # Highest-ranked proposal overlap, evaluated after inference.
     best_iou: float  # Best overlap anywhere in the candidate list.
+    elapsed_seconds: NotRequired[float]
+    physical_generations: NotRequired[int]
+    search_generations: NotRequired[int]
+    primary_detector_calls: NotRequired[int]
+    feature_encoder_calls: NotRequired[int]
+    peak_gpu_allocated_bytes: NotRequired[int]
     final_answer: NotRequired[str]  # Qwen text answer from the top-ranked region.
     warnings: NotRequired[
         list[str]
@@ -141,8 +150,7 @@ def main() -> None:
         return
     if args.workers < 1:
         parser.error("workers must be positive")
-    manifest = sorted(args.data_dir.glob("hrvs_bbox_samples_*.json"))[-1]
-    rows = json.loads(manifest.read_text())
+    rows = load_inference_questions(args.data_dir)
     questions = [
         Question(
             image_id=str(r["image_id"]),
@@ -203,18 +211,26 @@ def main() -> None:
         f"Loading shared models for {len(questions)} questions; workers={args.workers}",
         flush=True,
     )
+    staging = settings.get("model_residency", "resident") == "staged"
+    vision_device = "cpu" if staging else settings["device"]
+    compute_device = "cuda" if settings["device"] == "auto" else settings["device"]
     dino = dino_processor = None
     if settings.get("partition_mode", "semantic") == "semantic":
-        dino, dino_processor = load_dinov3()
-    qwen = load_qwen_scorer()
-    sam, sam_processor = load_sam3_model()
+        dino, dino_processor = load_dinov3(device=vision_device)
+    qwen = load_qwen_scorer(settings["device"], model_id=settings["qwen_model"],
+        revision=settings.get("qwen_revision"), cache_dir=settings.get("qwen_cache_dir"),
+        quantization=settings.get("qwen_quantization", "none"))
+    if staging:
+        qwen = staged_scorer(qwen, compute_device)
+    settings["scoring_backend"] = f"{qwen.model_id}@{qwen.model_revision}:{qwen.quantization}"
+    sam, sam_processor = load_sam3_model(vision_device)
     gpu_lock = threading.Lock()
 
     def features(pixels: NDArray) -> NDArray[np.float32]:
         with gpu_lock:
-            return exec_dinov3_pca_on_image(
-                pixels, dino, dino_processor, max_side=settings["feature_max_side"]
-            )
+            def encode():
+                return exec_dinov3_pca_on_image(pixels, dino, dino_processor, max_side=settings["feature_max_side"])
+            return staged_callable(encode, dino.to, compute_device)() if staging else encode()
 
     def score(
         image: Image.Image,
@@ -238,6 +254,9 @@ def main() -> None:
         if callable(method):
             setattr(score, prompt_method, guarded(method))
 
+    for key in ("model_id", "model_revision", "quantization"):
+        setattr(score, key, getattr(qwen, key))
+
     def score_candidates(
         image: Image.Image,
         query: str,
@@ -254,15 +273,11 @@ def main() -> None:
 
     def detect(pixels: NDArray, concept: str) -> list[SAM3Detection]:
         with gpu_lock:
-            return exec_sam3_on_image(
-                pixels,
-                sam,
-                sam_processor,
-                prompt=concept,
-                threshold=settings["sam3_threshold"],
-                mask_threshold=settings["mask_threshold"],
-                max_detections=settings["max_proposals_per_node"],
-            )
+            def proposal_call():
+                return exec_sam3_on_image(pixels, sam, sam_processor, prompt=concept,
+                    threshold=settings["sam3_threshold"], mask_threshold=settings["mask_threshold"],
+                    max_detections=settings["max_proposals_per_node"])
+            return staged_callable(proposal_call, sam.to, compute_device)() if staging else proposal_call()
 
     def execute(question: Question) -> Outcome:
         folder = args.output_dir / question["question_id"]
@@ -291,6 +306,8 @@ def main() -> None:
             image = np.asarray(load_dataset_image(args.data_dir, question["image_id"]))
             config = settings.copy()
             config["sam_prompt"] = concept
+            if args.workers == 1 and torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
             result = run_visual_search(
                 image,
                 query,
@@ -304,6 +321,11 @@ def main() -> None:
                     f"{question['question_id']}: {message}", flush=True
                 ),
             )
+            outcome['elapsed_seconds'] = result['elapsed_seconds']
+            for key in ('physical_generations','search_generations','primary_detector_calls','feature_encoder_calls'):
+                outcome[key] = result['usage'].get(key,0)
+            if args.workers == 1 and torch.cuda.is_available():
+                outcome['peak_gpu_allocated_bytes'] = torch.cuda.max_memory_allocated()
             outcome["api_calls"] = result["usage"]["api_calls"]
             outcome["cost_usd"] = result["usage"]["reported_cost_usd"]
             outcome["local_score_calls"] = result["usage"].get("local_score_calls", 0)
@@ -334,38 +356,46 @@ def main() -> None:
         return outcome
 
     outcomes: list[Outcome] = []
-    with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = [pool.submit(execute, q) for q in questions]
-        for future in as_completed(futures):
-            outcomes.append(future.result())
-            summary = {
-                "total": len(questions),
-                "attempted": len(outcomes),
-                "completed": sum(o["status"] == "complete" for o in outcomes),
-                "api_calls": sum(o["api_calls"] for o in outcomes),
-                "reported_cost_usd": sum(o["cost_usd"] for o in outcomes),
-                "outcomes": sorted(outcomes, key=lambda o: o["question_id"]),
-            }
-            summary.update(
-                images=len(selected_ids),
-                local_score_calls=sum(o["local_score_calls"] for o in outcomes),
-                top1_iou_at_50=sum(o["top1_iou"] >= 0.5 for o in outcomes),
-                any_iou_at_50=sum(o["best_iou"] >= 0.5 for o in outcomes),
-            )
-            summary["questions_with_recoverable_errors"] = sum(
-                bool(o.get("warnings")) for o in outcomes
-            )
-            temporary = args.output_dir / "summary.tmp"
-            temporary.write_text(json.dumps(summary, indent=2))
-            temporary.replace(args.output_dir / "summary.json")
-            links = "\n".join(
-                f'<li><a href="{html.escape(o["question_id"])}/inspection/index.html">{html.escape(o["question_id"])}</a> | <a href="{html.escape(o["question_id"])}/stages/tree/index.html">Tree and stages</a>: {o["status"]} {html.escape(o["error"])}</li>'
-                for o in summary["outcomes"]
-            )
-            (args.output_dir / "index.html").write_text(
-                f'<html><meta charset="utf-8"><h1>{html.escape(args.data_dir.name)}: {summary["completed"]}/{len(questions)} complete</h1><ul>{links}</ul></html>'
-            )
-            print(f"BATCH {len(outcomes)}/{len(questions)}: {outcomes[-1]}", flush=True)
+    def completed_outcomes():
+        if args.workers == 1:
+            for question in questions:
+                yield execute(question)
+        else:
+            with ThreadPoolExecutor(max_workers=args.workers) as pool:
+                futures = [pool.submit(execute, q) for q in questions]
+                for future in as_completed(futures):
+                    yield future.result()
+
+    for outcome in completed_outcomes():
+        outcomes.append(outcome)
+        summary = {
+            "total": len(questions),
+            "attempted": len(outcomes),
+            "completed": sum(o["status"] == "complete" for o in outcomes),
+            "api_calls": sum(o["api_calls"] for o in outcomes),
+            "reported_cost_usd": sum(o["cost_usd"] for o in outcomes),
+            "outcomes": sorted(outcomes, key=lambda o: o["question_id"]),
+        }
+        summary.update(
+            images=len(selected_ids),
+            local_score_calls=sum(o["local_score_calls"] for o in outcomes),
+            top1_iou_at_50=sum(o["top1_iou"] >= 0.5 for o in outcomes),
+            any_iou_at_50=sum(o["best_iou"] >= 0.5 for o in outcomes),
+        )
+        summary["questions_with_recoverable_errors"] = sum(
+            bool(o.get("warnings")) for o in outcomes
+        )
+        temporary = args.output_dir / "summary.tmp"
+        temporary.write_text(json.dumps(summary, indent=2))
+        temporary.replace(args.output_dir / "summary.json")
+        links = "\n".join(
+            f'<li><a href="{html.escape(o["question_id"])}/inspection/index.html">{html.escape(o["question_id"])}</a> | <a href="{html.escape(o["question_id"])}/stages/tree/index.html">Tree and stages</a>: {o["status"]} {html.escape(o["error"])}</li>'
+            for o in summary["outcomes"]
+        )
+        (args.output_dir / "index.html").write_text(
+            f'<html><meta charset="utf-8"><h1>{html.escape(args.data_dir.name)}: {summary["completed"]}/{len(questions)} complete</h1><ul>{links}</ul></html>'
+        )
+        print(f"BATCH {len(outcomes)}/{len(questions)}: {outcomes[-1]}", flush=True)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ from ..core.events import EventSink, SAM3CandidateRecord
 from ..core.imaging import to_pil_rgb
 from ..models.qwen_scoring import LocalScorer, load_qwen_scorer
 from ..models.regions import exec_dinov3_pca_on_image, load_dinov3
+from ..models.residency import staged_callable, staged_scorer
 from ..models.sam3 import exec_sam3_on_image, load_sam3_model
 from .config import default_search_config, validate_search_config
 from .runtime import (
@@ -120,7 +121,12 @@ def _prepare_local_scorer(
         "Prepare local Qwen verifier.",
         {"model_id": settings.get("scoring_backend", "Qwen3-VL-2B")},
     )
-    scorer = provided if provided is not None else load_qwen_scorer(settings["device"])
+    scorer = provided if provided is not None else load_qwen_scorer(settings["device"],
+        model_id=settings.get("qwen_model", "Qwen/Qwen3-VL-2B-Instruct"),
+        revision=settings.get("qwen_revision"), cache_dir=settings.get("qwen_cache_dir"),
+        quantization=settings.get("qwen_quantization", "none"))
+    if settings.get("model_residency", "resident") == "staged" and provided is None:
+        scorer = staged_scorer(scorer, "cuda" if settings["device"] == "auto" else settings["device"])
     on_event(
         "model_ready",
         "Local Qwen verifier ready.",
@@ -148,7 +154,9 @@ def _load_feature_extractor(
         "Load pinned local DINOv3 weights.",
         {"model_id": "facebook/dinov3-vitl16-pretrain-lvd1689m"},
     )
-    model, processor = load_dinov3(device=settings["device"])
+    staging = settings.get("model_residency", "resident") == "staged"
+    device = "cuda" if settings["device"] == "auto" else settings["device"]
+    model, processor = load_dinov3(device="cpu" if staging else settings["device"])
     extractor = partial(
         exec_dinov3_pca_on_image,
         model=model,
@@ -160,7 +168,7 @@ def _load_feature_extractor(
         "DINOv3 feature extractor ready.",
         {"model_id": "facebook/dinov3-vitl16-pretrain-lvd1689m"},
     )
-    return extractor
+    return staged_callable(extractor, model.to, device) if staging else extractor
 
 
 def _load_detector(
@@ -175,7 +183,9 @@ def _load_detector(
         "Load pinned local SAM3 weights.",
         {"model_id": "facebook/sam3"},
     )
-    model, processor = load_sam3_model(settings["device"])
+    staging = settings.get("model_residency", "resident") == "staged"
+    device = "cuda" if settings["device"] == "auto" else settings["device"]
+    model, processor = load_sam3_model("cpu" if staging else settings["device"])
     on_event("model_ready", "SAM3 detector ready.", {"model_id": "facebook/sam3"})
 
     def save_candidates(records: list[SAM3CandidateRecord]) -> None:
@@ -206,7 +216,7 @@ def _load_detector(
             on_candidates=save_candidates,
         )
 
-    return detector
+    return staged_callable(detector, model.to, device) if staging else detector
 
 
 def prepare_run(request: SearchRequest) -> RunState:
