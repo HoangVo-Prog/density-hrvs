@@ -286,7 +286,7 @@ def evaluate_candidates(
         )
     try:
         if distinct:
-            if state.settings.get("verification_mode", "region") == "region":
+            if state.settings.get("verification_mode", "region") in {"region", "question_region"}:
                 checks = verify_region_candidates(state, node, distinct, pixels, folder)
                 if checks is None:
                     checks = verify_candidates(state, node, distinct, folder)
@@ -354,6 +354,9 @@ def evaluate_node(state: RunState, node: SearchNode) -> NodeEvidence:
     folder = state.node_folder(node["node_id"])
     state.context.folder = folder
     save_node_input(state.rgb, node, pixels, folder)
+    if state.settings.get("verification_mode") == "question_region":
+        from .question_region import evaluate_question_region
+        return evaluate_question_region(state,node,pixels,folder)
     if state.settings.get("sam3_first", True):
         return evaluate_candidates(state, node, pixels, folder)
     return evaluate_legacy(state, node, pixels, folder)
@@ -366,7 +369,7 @@ def estimate_node(state: RunState, node: SearchNode) -> float:
     pending = state.detection_cache.get(node["node_id"])
     detection_cost = 0.0 if pending is not None else state.mean_cost("detect", 1.0)
     if state.settings.get("sam3_first", True):
-        if state.settings.get("verification_mode", "region") == "region":
+        if state.settings.get("verification_mode", "region") in {"region", "question_region"}:
             can_check = state.settings.get("region_candidate_limit", 5) > 0
             checks = (
                 1

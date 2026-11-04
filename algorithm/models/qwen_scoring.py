@@ -267,6 +267,35 @@ def load_qwen_scorer(device: str = "auto", *, model_id: str = QWEN_MODEL,
         return clean_sam_prompt(_generate_text(prompt, 64))
 
     @torch.inference_mode()
+    def resolve_objects(question: str, *, on_request: Callable = _ignore_request) -> dict:
+        from ..core.reference_prompts import OBJECTS_PROMPT, parse_object_plan
+        plan, raw, prompt = generate_rating(lambda current: _generate_text(current, 1024),
+            parse_object_plan, OBJECTS_PROMPT + json.dumps(question), on_request,
+            'Return one JSON object with target and objects. Include the requested object with role target, plus reference objects separately.')
+        return {**plan, 'raw_response':raw, 'resolver_prompt':prompt}
+
+    @torch.inference_mode()
+    def score_question_region(image: Image.Image, question: str, *, on_request: Callable = _ignore_request) -> dict:
+        prompt = """Evaluate this CLEAN REGION against the ORIGINAL QUESTION below.
+Is there enough visible evidence IN THIS REGION to identify the requested target
+using its stated attributes, references and spatial relationships, and answer the
+question? Inspect the entire region. There are no candidate boxes to verify.
+Judge the requested target in the question, not merely a reference object.
+Do not require any detector box or mask to cover the target. Do not guess missing
+context. Do not interpret bottom-left relative to this crop when the question
+refers to the whole intersection or scene; if the necessary context is absent,
+use Uncertain. Do not accept a similar object at a different specified location.
+Return ONLY JSON: {"answer":"Yes/No/Uncertain","score":0-100,"reason":"short visual explanation naming target and relevant evidence"}.
+Yes means the complete question is answerable from visible region evidence.
+No means absent target or a clear contradiction. Uncertain means insufficient
+identity, relation, or detail evidence. Score rates support for the full question.
+Original question: """ + json.dumps(question)
+        rating, raw, final_prompt = generate_rating(lambda current: _generate_image_text(image,current,384),
+            parse_verifier_score,prompt,on_request,'Return only JSON with answer Yes, No or Uncertain, score 0-100, and reason.')
+        return {**rating,'model_id':model_id,'model_revision':revision,'raw_response':raw,
+                'prompt':final_prompt,'input_size':image.size,'verification_input':'original_question_and_clean_region'}
+
+    @torch.inference_mode()
     def resolve_references(question: str, *, on_request: Callable = _ignore_request) -> dict:
         from ..core.reference_prompts import REFERENCE_PROMPT, parse_reference_plan
         plan, raw, prompt = generate_rating(
@@ -397,6 +426,8 @@ Question: """ + json.dumps(question)
     setattr(score, "compare_candidates", compare_candidates)
     setattr(score, "locate_statement", locate_statement)
     setattr(score, "resolve_references", resolve_references)
+    setattr(score, "resolve_objects", resolve_objects)
+    setattr(score, "score_question_region", score_question_region)
     setattr(score, "resolve_structured", resolve_structured)
     setattr(score, "answer_evidence", answer_evidence)
     setattr(score, "rewrite", rewrite)

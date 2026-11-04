@@ -39,7 +39,7 @@ def distinct_detections(
         ):
             raise ValueError("Candidate statistics require a valid, attributed detector confidence")
         if all(
-            (config.get("detector_prompt_mode") == "references"
+            (config.get("detector_prompt_mode") in {"references", "objects_and_references"}
              and detection.get("reference_id") != kept.get("reference_id"))
             or bbox_iou(detection["bbox"], kept["bbox"])
             <= config.get("region_nms_iou", 0.7)

@@ -69,6 +69,8 @@ def placeholder_rating(
 
 def candidate_query_text(state: RunState) -> str:
     """Choose the full query or detector phrase for candidate evidence sheets."""
+    if state.settings.get("detector_prompt_mode") == "objects_and_references":
+        return state.question
     if state.settings.get("detector_prompt_mode") == "references":
         refs = state.settings["reference_plan"]["references"]
         return ("Verify a REFERENCE object used to locate the requested target. "
@@ -164,22 +166,25 @@ def detect_region(
                 "proposal_limit": state.settings["max_proposals_per_node"],
             },
         )
-        if state.settings.get("detector_prompt_mode") == "references":
+        if state.settings.get("detector_prompt_mode") in {"references", "objects_and_references"}:
             detections = []
-            for reference in state.settings["reference_plan"]["references"]:
+            plan=state.settings["reference_plan"]
+            for reference in plan.get("objects",plan["references"]):
                 state.usage["primary_detector_calls"] = state.usage.get("primary_detector_calls", 0) + 1
-                state.usage["reference_detector_calls"] = state.usage.get("reference_detector_calls", 0) + 1
+                role=reference.get("role","reference")
+                counter="target_detector_calls" if role=="target" else "reference_detector_calls"
+                state.usage[counter]=state.usage.get(counter,0)+1
                 found = state.detector(pixels, reference["prompt"])
                 for detection in found:
                     detection = {**detection, "reference_id": reference["id"],
-                                 "prompt": reference["prompt"], "proposal_role": "reference"}
+                                 "prompt": reference["prompt"], "proposal_role": role}
                     detections.append(detection)
                     x, y, _, _ = node["bbox"]
                     a, b, c, d = detection["bbox"]
                     state.settings["reference_detections"].append({
                         "node_id": node["node_id"], "reference_id": reference["id"],
                         "prompt": reference["prompt"], "bbox": [x+a, y+b, x+c, y+d],
-                        "sam3_score": detection["sam3_score"], "proposal_role": "reference",
+                        "sam3_score": detection["sam3_score"], "proposal_role": role,
                         "sam3_selection": detection.get("sam3_selection", "above_threshold")})
                 if any(d.get("sam3_selection") == "top_k_fallback" for d in found):
                     state.usage["sam3_top_k_fallback_calls"] = state.usage.get("sam3_top_k_fallback_calls", 0) + 1

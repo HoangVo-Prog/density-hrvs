@@ -69,6 +69,7 @@ def main():
     parser.add_argument('--config',type=Path,required=True)
     parser.add_argument('--question-ids',nargs='*')
     parser.add_argument('--prepare-only',action='store_true')
+    parser.add_argument('--save-stages',action='store_true')
     args=parser.parse_args();output=args.output_dir.resolve();data=args.data_dir.resolve()
     config=json.loads(args.config.read_text())
     manifest=prepare_experiment(output,data,config,args.question_ids,Path(__file__).resolve().parents[2])
@@ -76,7 +77,8 @@ def main():
     if args.prepare_only:return
     command=[sys.executable,'-B','-u','-m','algorithm.tools.benchmark',
         '--data-dir',str(data),'--output-dir',str(output),'--workers','1','--limit-images','0',
-        '--config-file',str(output/'frozen_config.json'),'--no-stages']
+        '--config-file',str(output/'frozen_config.json')]
+    if not args.save_stages:command.append('--no-stages')
     if args.question_ids:command.extend(['--question-ids',*args.question_ids])
     env={**os.environ,'PYTHONPATH':str(output/'frozen_source'),'PYTHONDONTWRITEBYTECODE':'1'}
     state={'started_at':datetime.now(timezone.utc).isoformat(),'status':'running','driver_pid':os.getpid()}

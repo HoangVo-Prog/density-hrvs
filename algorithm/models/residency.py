@@ -26,7 +26,7 @@ def staged_scorer(scorer, device):
     move('cpu')
     torch.cuda.empty_cache()
     wrapped=staged_callable(scorer,move,device)
-    for name in ('resolve_references','locate_statement','resolve','rewrite','resolve_structured','answer','answer_evidence','score_candidates','compare_candidates'):
+    for name in ('resolve_objects','score_question_region','resolve_references','locate_statement','resolve','rewrite','resolve_structured','answer','answer_evidence','score_candidates','compare_candidates'):
         method=getattr(scorer,name,None)
         if callable(method):setattr(wrapped,name,staged_callable(method,move,device))
     for name in ('model_id','model_revision','quantization'):

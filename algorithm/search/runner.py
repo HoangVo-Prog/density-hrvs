@@ -129,8 +129,8 @@ def run_visual_search(
         on_step=observer,
         on_event=state.on_event,
     )
-    if state.settings.get("detector_prompt_mode") == "references":
-        result["localization_role"] = "reference"
+    if state.settings.get("detector_prompt_mode") in {"references", "objects_and_references"}:
+        result["localization_role"] = "answer_region" if state.settings.get("verification_mode")=="question_region" else "reference"
         result["reference_plan"] = state.settings["reference_plan"]
         result["reference_detections"] = state.settings["reference_detections"]
     _attach_rankings(state, result)

@@ -134,8 +134,8 @@ def _validate_candidate_settings(config: SearchConfig) -> None:
     check_limit = config.get("candidate_check_limit", 2)
     if type(check_limit) is not int or check_limit < 0:
         raise ValueError("candidate_check_limit must be a nonnegative integer")
-    if config.get("verification_mode", "region") not in {"region", "candidate"}:
-        raise ValueError("verification_mode must be 'region' or 'candidate'")
+    if config.get("verification_mode", "region") not in {"region", "candidate", "question_region"}:
+        raise ValueError("verification_mode must be region, candidate or question_region")
     region_limit = config.get("region_candidate_limit", 5)
     if type(region_limit) is not int or region_limit < 0:
         raise ValueError("region_candidate_limit must be a nonnegative integer")
@@ -245,8 +245,13 @@ def _validate_thresholds(config: SearchConfig) -> None:
 def _validate_strategy(config: SearchConfig) -> None:
     if config.get("primary_detector", "sam3") not in {"sam3", "llmdet"}:
         raise ValueError("Unknown primary detector")
-    if config.get("detector_prompt_mode", "category") not in {"category", "locating_statement", "references"}:
+    if config.get("detector_prompt_mode", "category") not in {"category", "locating_statement", "references", "objects_and_references"}:
         raise ValueError("Unknown detector prompt mode")
+    if config.get("detector_prompt_mode") == "objects_and_references":
+        if config.get("verification_mode") != "question_region" or config.get("primary_detector","sam3") != "sam3":
+            raise ValueError("Object/reference mode requires SAM3 and question_region verification")
+        if config.get("part_refinement") or config.get("grounding_dino_fallback") or config.get("discovery_mode","off") != "off":
+            raise ValueError("Disable alternate target detector paths for question_region mode")
     if config.get("detector_prompt_mode") == "references":
         if config.get("primary_detector", "sam3") != "sam3":
             raise ValueError("Reference mode requires SAM3")

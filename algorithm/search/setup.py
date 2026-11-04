@@ -44,6 +44,17 @@ def _resolve_sam_prompt(
     """
     if not settings.get("rewrite_sam_prompt", True):
         return
+    if settings.get("detector_prompt_mode") == "objects_and_references":
+        resolver = getattr(scorer,"resolve_objects",None)
+        if not callable(resolver):raise ValueError("Object mode requires Qwen resolve_objects")
+        settings["original_question"]=question or query
+        plan=invoke_counted(resolver,question or query,on_request=lambda:charge_generation(usage,"resolver"))
+        settings["reference_plan"]=plan
+        settings["reference_detections"]=[]
+        settings["sam_prompt"]="; ".join(o["prompt"] for o in plan["objects"])
+        usage["local_prompt_calls"]=usage.get("local_prompt_calls",0)+1
+        on_event("objects_resolved","Qwen extracted requested objects plus references.",{"object_plan":plan})
+        return
     if settings.get("detector_prompt_mode") == "references":
         resolver = getattr(scorer, "resolve_references", None)
         if not callable(resolver):

@@ -207,6 +207,7 @@ class SearchConfig(TypedDict):
     qwen_quantization: NotRequired[str]
     primary_detector: NotRequired[str]
     detector_prompt_mode: NotRequired[str]
+    original_question: NotRequired[str]
     detector_statement: NotRequired[str]
     sam3_fallback_top_k: NotRequired[int]
     reference_plan: NotRequired[dict]
