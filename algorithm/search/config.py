@@ -151,6 +151,10 @@ def _validate_candidate_settings(config: SearchConfig) -> None:
         value = config.get(name, 0)
         if type(value) is not int or value < minimum:
             raise ValueError(f"{name} must be an integer >= {minimum}")
+    for name, default in (("merge_small_fraction", .02), ("merge_max_bbox_fraction", .65)):
+        value = config.get(name, default)
+        if not math.isfinite(value) or not 0 < value < 1:
+            raise ValueError(f"{name} must be in (0, 1)")
     overlap = config.get("discovery_overlap", 0.10)
     if not math.isfinite(overlap) or not 0 <= overlap < 0.5:
         raise ValueError("discovery_overlap must be in [0, 0.5)")
@@ -235,8 +239,8 @@ def _validate_thresholds(config: SearchConfig) -> None:
 def _validate_strategy(config: SearchConfig) -> None:
     if config["strategy"] not in {"agent-uct", "uct", "greedy", "bfs"}:
         raise ValueError("Unknown search strategy.")
-    if config.get("partition_mode", "semantic") not in {"semantic", "spatial"}:
-        raise ValueError("partition_mode must be semantic or spatial")
+    if config.get("partition_mode", "semantic") not in {"semantic", "spatial", "adjacent_merge"}:
+        raise ValueError("partition_mode must be semantic, spatial or adjacent_merge")
     overlap = config.get("spatial_overlap", .1)
     if not math.isfinite(overlap) or not 0 <= overlap < .5:
         raise ValueError("spatial_overlap must be in [0, .5)")

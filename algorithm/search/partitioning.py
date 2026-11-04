@@ -33,6 +33,9 @@ from ..models.regions import (
 )
 
 
+from .adjacent_merge import split_merge_regions
+
+
 FeatureExtractor = Callable[[NDArray], NDArray[np.float32]]
 
 
@@ -460,6 +463,31 @@ def semantic_children(
     if fallback_children is not None:
         return fallback_children
     assert clusters is not None
+    if config.get("partition_mode") == "adjacent_merge":
+        shape = (node["mask"].shape[1], node["mask"].shape[0])
+        labels = np.asarray(Image.fromarray(clusters["labels"].astype(np.int32)).resize(shape, Image.Resampling.NEAREST))
+        features = np.asarray(Image.fromarray(np.rint(feature_map * 255).astype(np.uint8)).resize(shape, Image.Resampling.BILINEAR), dtype=np.float32) / 255.
+        merged, merge_info = split_merge_regions(
+            labels, features, node["mask"],
+            small_fraction=config.get("merge_small_fraction", .02),
+            max_regions=config["branching_factor"],
+            max_bbox_fraction=config.get("merge_max_bbox_fraction", .65),
+            min_occupancy=config.get("min_cluster_occupancy", .25),
+        )
+        if artifact_dir is not None:
+            np.savez_compressed(artifact_dir / "adjacent_merge.npz", labels=merged)
+            (artifact_dir / "adjacent_merge.json").write_text(json.dumps(merge_info, indent=2))
+        children = [_tight_child((merged == value) & node["mask"], node)
+                    for value in np.unique(merged[node["mask"]]) if value > 0]
+        fallback, reasons, qualities = _split_quality(children, node, config)
+        reasons["too_many_components"] = len(children) > config["branching_factor"]
+        fallback = fallback or reasons["too_many_components"]
+        selected = spatial_children(node) if fallback else children
+        _save_split_artifacts(artifact_dir, image, node, pixels, selected, qualities, fallback, reasons)
+        on_event("adjacent_merge_completed", f"N{node['node_id']}: split and merge local regions.",
+                 {"node_id": node["node_id"], **merge_info, "used_spatial_fallback": fallback})
+        _emit_split_completed(node, selected, fallback, reasons, len(children), on_event)
+        return selected
     children = _children_from_clusters(
         node, clusters, segmentation, original_width, original_height
     )

@@ -215,7 +215,7 @@ def main() -> None:
     vision_device = "cpu" if staging else settings["device"]
     compute_device = "cuda" if settings["device"] == "auto" else settings["device"]
     dino = dino_processor = None
-    if settings.get("partition_mode", "semantic") == "semantic":
+    if settings.get("partition_mode", "semantic") != "spatial":
         dino, dino_processor = load_dinov3(device=vision_device)
     qwen = load_qwen_scorer(settings["device"], model_id=settings["qwen_model"],
         revision=settings.get("qwen_revision"), cache_dir=settings.get("qwen_cache_dir"),

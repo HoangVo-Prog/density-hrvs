@@ -286,6 +286,8 @@ class SearchConfig(TypedDict):
     max_local_scores: NotRequired[
         int
     ]  # Local generation budget including repair attempts; 0 is unlimited.
+    merge_small_fraction: NotRequired[float]
+    merge_max_bbox_fraction: NotRequired[float]
     cluster_spatial_weight: NotRequired[float]  # Normalized centroid weight in K-means.
     min_cluster_occupancy: NotRequired[float]  # Active-pixel fraction of a child bbox.
     max_cluster_aspect: NotRequired[float]  # Maximum child bbox elongation.
