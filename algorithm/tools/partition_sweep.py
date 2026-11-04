@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import time
+import zipfile
 
 import numpy as np
 from PIL import Image
@@ -39,7 +40,13 @@ def score(features,labels,sample):
 def run(args):
     out=args.output_dir;out.mkdir(parents=True,exist_ok=True)
     config=default_config();model=processor=None;results=[]
-    ids=sorted({q['image_id'] for q in load_inference_questions(args.data_dir)})
+    image_ids={q['image_id'] for q in load_inference_questions(args.data_dir)}
+    extensions={'.jpg','.jpeg','.png','.webp'}
+    image_ids.update(p.stem for p in args.data_dir.rglob('*') if p.is_file() and p.suffix.lower() in extensions)
+    for archive in args.data_dir.glob('*.zip'):
+        with zipfile.ZipFile(archive) as z:
+            image_ids.update(Path(n).stem for n in z.namelist() if Path(n).suffix.lower() in extensions)
+    ids=sorted(image_ids)
     specification={'data_dir':str(args.data_dir.resolve()),'image_ids':ids,'cluster_counts':[1,3,5,7],
         'dino_model':DINOV3_ID,'dino_revision':DINOV3_REVISION,'max_side':1024,
         'spatial_weight':.75,'silhouette_sample':args.sample_size,'random_seed':42,
