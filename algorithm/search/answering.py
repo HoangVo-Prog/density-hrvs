@@ -45,7 +45,8 @@ def answer_top_region(state: RunState, result: SearchResult) -> FinalAnswer | No
         return None
     if not result["ranked_regions"]:
         return None
-    answerer = getattr(state.local_scorer, "answer", None)
+    answer_method = "answer_spatial" if state.settings.get("answer_view") == "spatial_context" else "answer"
+    answerer = getattr(state.local_scorer, answer_method, None)
     if not callable(answerer):
         return None
 
@@ -62,7 +63,17 @@ def answer_top_region(state: RunState, result: SearchResult) -> FinalAnswer | No
         return None
     view_type = state.settings.get("answer_view", "legacy_crop")
     evidence = None
-    if view_type == "marked_detail":
+    spatial_context=None
+    if view_type == "spatial_context":
+        from ..models.spatial_context import build_region_context,spatial_answer_prompt
+        answerer=getattr(state.local_scorer,"answer_spatial",None)
+        if not callable(answerer):raise ValueError("spatial_context answer requires answer_spatial")
+        spatial_context=build_region_context(state.source_image,best["bbox"],best.get("mask"),
+            node_id=best.get("cluster_id"),max_side=state.settings.get("spatial_overview_max_side",768))
+        crop_bbox=best["bbox"]
+        crop=state.source_image.crop(crop_bbox)
+        template=ANSWER_PROMPT
+    elif view_type == "marked_detail":
         evidence_answerer = getattr(state.local_scorer, "answer_evidence", None)
         if not callable(evidence_answerer):
             raise ValueError("marked_detail requires an answer_evidence callable")
@@ -77,7 +88,10 @@ def answer_top_region(state: RunState, result: SearchResult) -> FinalAnswer | No
         crop = state.source_image.crop(crop_bbox)
         template = ANSWER_PROMPT
     prompt = template.format(question=json.dumps(state.question))
-    raw = invoke_counted(answerer, crop, state.question, on_request=state.charge_answer)
+    if spatial_context is not None:
+        prompt=spatial_answer_prompt(state.question,spatial_context["metadata"])
+    kwargs={"spatial_context":spatial_context} if spatial_context is not None else {}
+    raw = invoke_counted(answerer, crop, state.question, on_request=state.charge_answer,**kwargs)
     if not isinstance(raw, str):
         raise ValueError("answerer returned a non-string")
     answer = clean_answer(raw)
@@ -87,6 +101,8 @@ def answer_top_region(state: RunState, result: SearchResult) -> FinalAnswer | No
         "selected_candidate_id": f"node_{best.get('cluster_id', 'unknown')}:candidate_{best.get('candidate_rank', 'unknown')}",
         "evidence_info": evidence_info(evidence) if evidence is not None else {},
         "input_pixels": np.asarray(crop),
+        **({"input_overview_pixels":np.asarray(spatial_context["overview"]),
+            "spatial_metadata":spatial_context["metadata"]} if spatial_context is not None else {}),
         "question": state.question,
         "answer": answer,
         "bbox": best["bbox"],

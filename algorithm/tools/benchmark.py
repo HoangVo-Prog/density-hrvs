@@ -259,7 +259,7 @@ def main() -> None:
 
         return call
 
-    for prompt_method in ("resolve_objects", "score_question_region", "resolve_references", "locate_statement", "rewrite", "resolve", "resolve_structured", "compare_candidates", "answer", "answer_evidence"):
+    for prompt_method in ("resolve_objects", "score_question_region", "resolve_references", "locate_statement", "rewrite", "resolve", "resolve_structured", "compare_candidates", "answer", "answer_spatial", "answer_evidence"):
         method = getattr(qwen, prompt_method, None)
         if callable(method):
             setattr(score, prompt_method, guarded(method))

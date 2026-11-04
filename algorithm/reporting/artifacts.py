@@ -83,6 +83,11 @@ def save_search_result(
         }
         if "score_components" in cluster:
             cluster_report["score_components"] = cluster["score_components"]
+        if "verification_overview" in cluster:
+            (output/"region_overviews").mkdir(exist_ok=True)
+            overview_path=f"region_overviews/node_{cluster['cluster_id']}.png"
+            to_pil_rgb(cluster["verification_overview"]).save(output/overview_path)
+            cluster_report["overview_input_image_path"]=overview_path
         clusters.append(cluster_report)
     proposals: list[ProposalReport] = []
     for index, proposal in enumerate(result["ranked_regions"]):
@@ -147,6 +152,10 @@ def save_search_result(
         final = dict(result["final_answer"])
         source = to_pil_rgb(image)
         answer_path = "final_answer_region.png"
+        overview_pixels=final.pop("input_overview_pixels",None)
+        if overview_pixels is not None:
+            to_pil_rgb(overview_pixels).save(output/"final_answer_overview.png")
+            final["overview_image_path"]="final_answer_overview.png"
         pixels = final.pop("input_pixels", None)
         if pixels is not None:
             to_pil_rgb(pixels).save(output / answer_path)

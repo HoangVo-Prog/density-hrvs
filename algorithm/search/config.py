@@ -169,8 +169,14 @@ def _validate_candidate_settings(config: SearchConfig) -> None:
     for flag in ("require_verified_answer", "strict_fallback_limit", "structured_query", "part_refinement", "comparative_reranking", "grounding_dino_fallback", "part_crop_retry"):
         if not isinstance(config.get(flag, True), bool):
             raise ValueError(f"{flag} must be a boolean")
-    if config.get("answer_view", "legacy_crop") not in {"marked_detail", "legacy_crop"}:
-        raise ValueError("answer_view must be marked_detail or legacy_crop")
+    if config.get("answer_view", "legacy_crop") not in {"marked_detail", "legacy_crop", "spatial_context"}:
+        raise ValueError("answer_view must be marked_detail, legacy_crop or spatial_context")
+    if config.get("region_spatial_context",False):
+        if config.get("verification_mode")!="question_region":
+            raise ValueError("Spatial region context requires question_region verification")
+        side=config.get("spatial_overview_max_side",768)
+        if type(side) is not int or not 128<=side<=1536:
+            raise ValueError("spatial_overview_max_side must be an integer from 128 through 1536")
     for name in ("finalization_reserve", "max_part_detector_calls", "part_candidate_limit", "max_fallback_detector_calls"):
         value = config.get(name, 0)
         if type(value) is not int or value < 0:

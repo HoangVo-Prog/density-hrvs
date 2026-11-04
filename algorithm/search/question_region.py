@@ -14,7 +14,16 @@ def evaluate_question_region(state,node,pixels,folder):
     detections=detect_region(state,node,pixels)
     distinct=distinct_detections(detections,state.settings)
     image=to_pil_rgb(pixels)
-    key=state.view_key(image,"region",state.question)
+    spatial_context=None
+    key_description=state.question
+    if state.settings.get("region_spatial_context",False):
+        from ..models.spatial_context import build_region_context
+        import hashlib
+        spatial_context=build_region_context(state.source_image,node["bbox"],node["mask"],
+            node_id=node["node_id"],max_side=state.settings.get("spatial_overview_max_side",768))
+        key_description+=json.dumps(spatial_context["metadata"],sort_keys=True)
+        key_description+=hashlib.sha256(spatial_context["overview"].tobytes()).hexdigest()
+    key=state.view_key(image,"region",key_description)
     if key in state.score_cache:
         state.usage["cache_hits"]+=1;rating=state.score_cache[key]
     else:
@@ -22,7 +31,9 @@ def evaluate_question_region(state,node,pixels,folder):
         if not callable(verifier):raise ValueError("Question-region mode requires Qwen score_question_region")
         tick=time.perf_counter()
         state.usage["logical_score_requests"]=state.usage.get("logical_score_requests",0)+1
-        try:rating=invoke_counted(verifier,image,state.question,on_request=state.charge_local)
+        try:
+            kwargs={"spatial_context":spatial_context} if spatial_context is not None else {}
+            rating=invoke_counted(verifier,image,state.question,on_request=state.charge_local,**kwargs)
         finally:state.record_cost("score",time.perf_counter()-tick)
         state.score_cache[key]=rating
     quality=rating["score"] if rating["answer"]!="No" else 0.
@@ -40,10 +51,15 @@ def evaluate_question_region(state,node,pixels,folder):
         "proposal_role":"answer_region","scoring_method":"qwen3vl_original_question_clean_region"}
     from .pipeline import _record_cluster,register_proposals
     _record_cluster(state,node,pixels,quality,rating,components)
+    if spatial_context is not None:
+        state.observed_clusters[-1]["verification_overview"]=np.asarray(spatial_context["overview"])
     register_proposals(state,[proposal])
     save_node_detections(pixels,detections,distinct,components,folder)
     if folder is not None:
         image.save(folder/"question_region_input.png")
+        if spatial_context is not None:
+            spatial_context["overview"].save(folder/"question_region_overview.png")
+            (folder/"question_region_mapping.json").write_text(json.dumps(spatial_context["metadata"],indent=2))
         (folder/"question_region_score.json").write_text(json.dumps({"question":state.question,"rating":rating},indent=2))
     state.on_event("question_region_verified","Qwen evaluated original question on the clean region.",
         {"node_id":node["node_id"],"question":state.question,"qwen":rating,"detector_boxes":len(detections)})

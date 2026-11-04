@@ -255,6 +255,18 @@ def load_qwen_scorer(device: str = "auto", *, model_id: str = QWEN_MODEL,
             generated[:, inputs["input_ids"].shape[1] :], skip_special_tokens=True
         )[0]
 
+    def _generate_spatial_text(overview,region,prompt,max_new_tokens):
+        messages=[{"role":"user","content":[
+            {"type":"text","text":"IMAGE 1: FULL-SCENE OVERVIEW"},
+            {"type":"image","image":overview.convert("RGB")},
+            {"type":"text","text":"IMAGE 2: CLEAN ENLARGED REGION"},
+            {"type":"image","image":region.convert("RGB")},
+            {"type":"text","text":prompt}]}]
+        inputs=processor.apply_chat_template(messages,tokenize=True,add_generation_prompt=True,
+            return_dict=True,return_tensors="pt").to(selected)
+        generated=model.generate(**inputs,max_new_tokens=max_new_tokens,do_sample=False)
+        return processor.batch_decode(generated[:,inputs["input_ids"].shape[1]:],skip_special_tokens=True)[0]
+
     @torch.inference_mode()
     def rewrite(query: str, concept: str, *, on_request: Callable = _ignore_request) -> str:
         target = concept.strip()
@@ -275,7 +287,17 @@ def load_qwen_scorer(device: str = "auto", *, model_id: str = QWEN_MODEL,
         return {**plan, 'raw_response':raw, 'resolver_prompt':prompt}
 
     @torch.inference_mode()
-    def score_question_region(image: Image.Image, question: str, *, on_request: Callable = _ignore_request) -> dict:
+    def score_question_region(image: Image.Image, question: str, *, on_request: Callable = _ignore_request, spatial_context=None) -> dict:
+        if spatial_context is not None:
+            from .spatial_context import spatial_verification_prompt
+            metadata=spatial_context["metadata"]
+            prompt=spatial_verification_prompt(question,metadata)
+            rating,raw,final_prompt=generate_rating(
+                lambda current:_generate_spatial_text(spatial_context["overview"],image,current,384),
+                parse_verifier_score,prompt,on_request,'Return only JSON with answer Yes/No/Uncertain, score 0-100, reason.')
+            return {**rating,'model_id':model_id,'model_revision':revision,'raw_response':raw,
+                'prompt':final_prompt,'input_size':image.size,'overview_input_size':spatial_context["overview"].size,
+                'spatial_metadata':metadata,'verification_input':'original_question_overview_clean_region_coordinates'}
         prompt = """Evaluate this CLEAN REGION against the ORIGINAL QUESTION below.
 Is there enough visible evidence IN THIS REGION to identify the requested target
 using its stated attributes, references and spatial relationships, and answer the
@@ -406,6 +428,13 @@ Question: """ + json.dumps(question)
         return _generate_image_text(image, prompt, 96)
 
     @torch.inference_mode()
+    def answer_spatial(image,question,*,spatial_context,on_request: Callable = _ignore_request):
+        from .spatial_context import spatial_answer_prompt
+        prompt=spatial_answer_prompt(question,spatial_context["metadata"])
+        on_request()
+        return _generate_spatial_text(spatial_context["overview"],image,prompt,96)
+
+    @torch.inference_mode()
     def answer_evidence(image: Image.Image, question: str, *,
                         on_request: Callable = _ignore_request) -> str:
         prompt = EVIDENCE_ANSWER_PROMPT.format(question=json.dumps(question))
@@ -430,6 +459,7 @@ Question: """ + json.dumps(question)
     setattr(score, "score_question_region", score_question_region)
     setattr(score, "resolve_structured", resolve_structured)
     setattr(score, "answer_evidence", answer_evidence)
+    setattr(score, "answer_spatial", answer_spatial)
     setattr(score, "rewrite", rewrite)
     setattr(score, "resolve", resolve)
     setattr(score, "score_candidates", score_candidates)
