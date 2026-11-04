@@ -203,6 +203,8 @@ class SearchConfig(TypedDict):
     qwen_revision: NotRequired[str | None]
     qwen_cache_dir: NotRequired[str | None]
     qwen_quantization: NotRequired[str]
+    feature_cache_root: NotRequired[str]
+    feature_source: NotRequired[str]
     partition_mode: NotRequired[str]
     spatial_overlap: NotRequired[float]
     grounding_dino_fallback: NotRequired[bool]

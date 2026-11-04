@@ -21,6 +21,7 @@ from ..reporting.inspection import make_inspection
 from ..models.qwen_scoring import load_qwen_scorer
 from ..core.query import question_target
 from ..models.scoring import ScoringView, _ignore_request
+from ..models.cached_features import CachedFullImageFeatures
 from ..models.regions import exec_dinov3_pca_on_image, load_dinov3
 from ..search.runner import run_visual_search, save_search_result
 from ..models.residency import staged_callable, staged_scorer
@@ -215,7 +216,7 @@ def main() -> None:
     vision_device = "cpu" if staging else settings["device"]
     compute_device = "cuda" if settings["device"] == "auto" else settings["device"]
     dino = dino_processor = None
-    if settings.get("partition_mode", "semantic") != "spatial":
+    if settings.get("partition_mode", "semantic") != "spatial" and not settings.get("feature_cache_root"):
         dino, dino_processor = load_dinov3(device=vision_device)
     qwen = load_qwen_scorer(settings["device"], model_id=settings["qwen_model"],
         revision=settings.get("qwen_revision"), cache_dir=settings.get("qwen_cache_dir"),
@@ -227,7 +228,10 @@ def main() -> None:
     gpu_lock = threading.Lock()
 
     def features(pixels: NDArray) -> NDArray[np.float32]:
+        nonlocal dino, dino_processor
         with gpu_lock:
+            if dino is None:
+                dino, dino_processor = load_dinov3(device=vision_device)
             def encode():
                 return exec_dinov3_pca_on_image(pixels, dino, dino_processor, max_side=settings["feature_max_side"])
             return staged_callable(encode, dino.to, compute_device)() if staging else encode()
@@ -304,7 +308,12 @@ def main() -> None:
         }
         try:
             image = np.asarray(load_dataset_image(args.data_dir, question["image_id"]))
+            feature_provider = features
+            if settings.get("feature_cache_root"):
+                feature_provider = CachedFullImageFeatures(image,
+                    Path(settings["feature_cache_root"]) / question["image_id"], features)
             config = settings.copy()
+            config["feature_source"] = "cached_full_image" if settings.get("feature_cache_root") else "fresh_crop"
             config["sam_prompt"] = concept
             if args.workers == 1 and torch.cuda.is_available():
                 torch.cuda.reset_peak_memory_stats()
@@ -315,7 +324,7 @@ def main() -> None:
                 config=config,
                 local_scorer=score,
                 detector=detect,
-                feature_extractor=features,
+                feature_extractor=feature_provider,
                 artifact_dir=None if args.no_stages else folder / "stages",
                 progress=lambda message: print(
                     f"{question['question_id']}: {message}", flush=True

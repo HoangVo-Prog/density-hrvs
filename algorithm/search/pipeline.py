@@ -39,8 +39,15 @@ def split_node(state: RunState, node: SearchNode) -> list[ChildRegion]:
     if node["node_id"] not in state.split_cache:
         tick = time.perf_counter()
         def counted_features(pixels):
+            provider = state.feature_extractor
+            if hasattr(provider, "for_region"):
+                before = provider.encoder_calls
+                result = provider.for_region(node)
+                state.usage["feature_encoder_calls"] = state.usage.get("feature_encoder_calls", 0) + provider.encoder_calls - before
+                state.usage["feature_cache_region_reads"] = state.usage.get("feature_cache_region_reads", 0) + 1
+                return result
             state.usage["feature_encoder_calls"] = state.usage.get("feature_encoder_calls", 0) + 1
-            return state.feature_extractor(pixels)
+            return provider(pixels)
         if state.settings.get("partition_mode", "semantic") == "spatial":
             semantic = [] if _should_skip_split(node, state.settings, state.on_event) else spatial_children(
                 node, state.settings.get("spatial_overlap", .1))
