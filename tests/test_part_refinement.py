@@ -59,9 +59,19 @@ class PartRefinementTests(unittest.TestCase):
         refine_answer_part(state,result)
         self.assertEqual(state.usage['part_detector_calls'],2)
 
+    def test_no_part_plan_does_not_reserve_unused_part_generations(self):
+        state=object.__new__(RunState)
+        state.settings={'max_local_scores':5,'part_refinement':True,'finalization_reserve':2,
+                        'query_plan':{'attribute_region':None}}
+        state.usage={}
+        self.assertEqual(state.tree_generation_limit(),5)
+        for _ in range(5):state.charge_local()
+        self.assertEqual(state.remaining_generations(),0)
+
     def test_postprocess_reserve_stays_inside_total_search_generation_limit(self):
         state=object.__new__(RunState)
-        state.settings={'max_local_scores':5,'part_refinement':True,'finalization_reserve':2}
+        state.settings={'max_local_scores':5,'part_refinement':True,'finalization_reserve':2,
+                        'query_plan':{'attribute_region':{'concept':'badge'}}}
         state.usage={}
         for _ in range(3):state.charge_local()
         self.assertEqual(state.remaining_generations(),0)

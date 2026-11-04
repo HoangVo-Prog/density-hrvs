@@ -111,7 +111,10 @@ class RunState:
 
     def tree_generation_limit(self) -> int:
         budget = self.settings.get("max_local_scores", 32)
-        reserve = self.settings.get("finalization_reserve", 4) if (self.settings.get("part_refinement", False) or self.settings.get("comparative_reranking", False)) else 0
+        needs_part = (self.settings.get("part_refinement", False)
+                      and bool(self.settings.get("query_plan", {}).get("attribute_region")))
+        reserve = self.settings.get("finalization_reserve", 4) if (
+            needs_part or self.settings.get("comparative_reranking", False)) else 0
         return max(1, budget - reserve) if budget else 0
 
     def charge_final(self, stage: str) -> None:
