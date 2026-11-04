@@ -1,6 +1,5 @@
 import json
 from types import SimpleNamespace
-from types import SimpleNamespace
 from algorithm.search.evaluation import candidate_query_text
 import unittest
 
@@ -18,6 +17,28 @@ def badge_plan():
 
 
 class QueryPlanTests(unittest.TestCase):
+    def test_color_is_not_a_physical_part(self):
+        plan=badge_plan();plan['attribute_region']['concept']='color'
+        with self.assertRaisesRegex(ValueError,'physical object/part'):
+            parse_query_plan(json.dumps(plan))
+
+    def test_detector_category_is_separate_from_full_identity_description(self):
+        plan=badge_plan();plan['detector_concept']='person'
+        result=parse_query_plan(json.dumps(plan))
+        self.assertEqual(result['detector_concept'],'person')
+        questions=[]
+        def resolve(question,*,on_request):
+            on_request();questions.append(question);return result
+        settings={'structured_query':True,'sam_prompt':'badge'}
+        _resolve_sam_prompt(settings,'full query',SimpleNamespace(resolve_structured=resolve),{},lambda *a:None,'What color is the badge?')
+        self.assertEqual(settings['sam_prompt'],'person')
+        self.assertEqual(settings['query_plan']['entity']['concept'],'man in dark polo shirt')
+
+    def test_spatial_relationship_is_not_a_detector_category(self):
+        plan=badge_plan();plan['detector_concept']='camera on left tripod'
+        with self.assertRaisesRegex(ValueError,'short physical category'):
+            parse_query_plan(json.dumps(plan))
+
     def test_owner_stage_uses_full_relations_without_demanding_a_part_sized_box(self):
         question='What color is the badge of the man right of the woman in blue?'
         state=SimpleNamespace(settings={'structured_query':True,'query_plan':{

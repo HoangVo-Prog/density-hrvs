@@ -361,7 +361,7 @@ def load_qwen_scorer(device: str = "auto", *, model_id: str = QWEN_MODEL,
     def resolve_structured(question: str, *, on_request: Callable = _ignore_request) -> dict:
         plan, _, _ = generate_rating(lambda prompt: _generate_text(prompt, 512),
             lambda reply: parse_query_plan(reply, question), STRUCTURED_QUERY_PROMPT.format(question=json.dumps(question)),
-            on_request, "Return only valid JSON with entity_concept, part_concept, reference_concepts and scene_constraints.")
+            on_request, "Return one JSON object with entity_concept, detector_concept, part_concept, reference_concepts and scene_constraints. part_concept must be a PHYSICAL item or null, never color/pattern/shape/material. detector_concept must be a short category without spatial relations.")
         return plan
 
     setattr(score, "set_device", lambda target: model.to(target))

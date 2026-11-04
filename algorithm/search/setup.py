@@ -51,11 +51,12 @@ def _resolve_sam_prompt(
                 plan = invoke_counted(structured, question or query,
                     on_request=lambda: charge_generation(usage, "resolver"))
                 settings["query_plan"] = plan
-                settings["sam_prompt"] = plan["entity"]["concept"]
+                settings["sam_prompt"] = plan.get("detector_concept", plan["entity"]["concept"])
                 usage["local_prompt_calls"] = usage.get("local_prompt_calls", 0) + 1
                 on_event("query_resolved", "Resolved entity, requested part and reference roles.", {"query_plan": plan})
                 return
             except Exception as exc:
+                settings['query_plan_error'] = f'{type(exc).__name__}: {exc}'
                 on_event("query_resolution_failed", "Structured resolution failed; use logged legacy fallback.",
                          {"error": f"{type(exc).__name__}: {exc}"})
     resolver = getattr(scorer, "resolve", None)

@@ -28,3 +28,13 @@ physical/detector caps hold; no answer comes from a rejected/unchecked candidate
 paired gains and regressions against the matched 8B control, including the 26 original joint
 successes; inspect ownership/part failures. A larger-model answer-only gain does not qualify
 the combined pipeline by itself. Do not launch the full export merely because code tests pass.
+
+
+The initial integration exposed `part_concept=color`, which is not a physical object.
+The resolver now separates a short detector category from the complete entity description
+and rejects properties such as color/pattern/shape as physical parts. Full relations remain
+in owner verification. A question-only 134-case 8B GPU preflight produced 134 structurally
+valid physical plans, one generation each (`query_plans134_qwen8_v3`). This preflight is not
+image accuracy or proof that every semantic role is correct; unknown-object/reference
+confusions remain an evaluation concern. The corrected full image runs use the v3 output
+folders and fresh immutable snapshots. Earlier interrupted attempts are not merged with them.

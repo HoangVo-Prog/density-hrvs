@@ -2,12 +2,34 @@
 from __future__ import annotations
 
 import json
+import re
 
 
 def _phrase(value, field: str, maximum: int = 160) -> str:
     if not isinstance(value, str) or not value.strip() or len(value.strip()) > maximum:
         raise ValueError(f'{field} must be a nonempty phrase of at most {maximum} characters')
     return ' '.join(value.split())
+
+
+NONPHYSICAL = {'color','colour','pattern','shape','material','size','texture','shade','hue','identity','null','none'}
+
+
+def _physical_phrase(value, field):
+    phrase=_phrase(value,field)
+    words=re.findall(r"[a-z]+",phrase.lower())
+    while words and words[0] in {'the','a','an'}:words.pop(0)
+    if not words or words[0] in NONPHYSICAL:
+        raise ValueError(f'{field} must identify a physical object/part, not an attribute')
+    return phrase
+
+
+def _detector_phrase(value):
+    phrase=_physical_phrase(value,'detector_concept')
+    words=re.findall(r"[a-z]+",phrase.lower())
+    relations={'on','of','with','behind','under','above','between','beside','next','standing','sitting','left','right','near','top','bottom'}
+    if len(words)>4 or any(word in relations for word in words):
+        raise ValueError('detector_concept must be a short physical category without spatial relations')
+    return phrase
 
 
 def parse_query_plan(text: str, question: str | None = None) -> dict:
@@ -23,6 +45,7 @@ def parse_query_plan(text: str, question: str | None = None) -> dict:
     if 'entity_concept' in payload:
         # A flat generation schema is less fragile for the local 2B model.
         # Build internal identifiers ourselves instead of asking it to cross-reference them.
+        detector = payload.get('detector_concept')
         references = payload.get('reference_concepts', [])
         if not isinstance(references, list):
             raise ValueError('reference_concepts must be a list')
@@ -35,7 +58,7 @@ def parse_query_plan(text: str, question: str | None = None) -> dict:
         constraints = payload.get('scene_constraints', [])
         if not isinstance(constraints, list):
             raise ValueError('scene_constraints must be a list')
-        payload = {'entity': {'concept': payload['entity_concept']},
+        payload = {'detector_concept': detector, 'entity': {'concept': payload['entity_concept']},
             'attribute_region': {'concept': part, 'relation': 'associated with the selected entity'} if part else None,
             'requested_attribute': attribute,
             'anchors': [{'id': f'anchor_{i}', 'concept': value} for i,value in enumerate(references,1)],
@@ -45,14 +68,16 @@ def parse_query_plan(text: str, question: str | None = None) -> dict:
     entity = payload.get('entity')
     if not isinstance(entity, dict):
         raise ValueError('Query plan needs an entity')
-    result = {'entity': {'id': 'entity', 'concept': _phrase(entity.get('concept'), 'entity.concept')},
+    result = {'entity': {'id': 'entity', 'concept': _physical_phrase(entity.get('concept'), 'entity.concept')},
               'attribute_region': None, 'requested_attribute': _phrase(payload.get('requested_attribute'), 'requested_attribute', 40),
               'anchors': [], 'relations': [], 'scene_constraints': []}
+    if payload.get('detector_concept') is not None:
+        result['detector_concept'] = _detector_phrase(payload['detector_concept'])
     part = payload.get('attribute_region')
     if part is not None:
         if not isinstance(part, dict):
             raise ValueError('attribute_region must be an object or null')
-        result['attribute_region'] = {'id': 'attribute', 'concept': _phrase(part.get('concept'), 'attribute_region.concept'),
+        result['attribute_region'] = {'id': 'attribute', 'concept': _physical_phrase(part.get('concept'), 'attribute_region.concept'),
                                       'relation': _phrase(part.get('relation'), 'attribute_region.relation')}
     anchors = payload.get('anchors', [])
     if not isinstance(anchors, list) or len(anchors) > 8:
@@ -84,21 +109,24 @@ def parse_query_plan(text: str, question: str | None = None) -> dict:
     return result
 
 
-STRUCTURED_QUERY_PROMPT = """Extract search roles from the question. Do not answer it.
-Return ONE JSON object with exactly these four fields:
-entity_concept: short detector phrase for the entity to identify.
-part_concept: the requested clothing/belonging/subpart to inspect, or null.
-reference_concepts: list of short phrases for other objects used as clues.
-scene_constraints: list of location phrases copied exactly from the question, or [].
+STRUCTURED_QUERY_PROMPT = """Extract physical search roles from the question. Do not answer it.
+Return ONE JSON object with these FIVE fields:
+entity_concept: the physical entity/owner to identify, with its identifying description.
+detector_concept: its short physical CATEGORY for an object detector (1-4 words),
+    such as person, camera, or luggage. Put spatial relationships in the other fields.
+part_concept: the PHYSICAL clothing/belonging/subpart asked about, or JSON null.
+reference_concepts: short phrases for other objects used as clues.
+scene_constraints: location phrases copied exactly from the question, or [].
 
-For clothing or belongings, entity_concept is the owning PERSON with identifying
-clothing and part_concept is the requested item. For a standalone object,
-entity_concept is that object and part_concept is null unless a subpart is asked.
-For a question asking WHAT something is, preserve the unknown object descriptively
-without guessing its identity. If asked what supports another object, the entity
-is its unknown support, while the supported object is a reference. Do not replace
-an unknown hanging object with the railing from which it hangs.
-Use only information present in the question. Keep entity phrases under 16 words.
-The full question will remain available for all spatial and ownership checks.
+Color, pattern, material, shape and size are PROPERTIES, never physical parts.
+For a standalone camera's color: entity_concept is camera, detector_concept is
+camera, part_concept is null. A tripod beside/beneath it is a reference.
+For a person's badge: entity_concept describes that person, detector_concept is
+person, part_concept is badge. For a camera's lower dome: detector_concept is
+camera and part_concept is lower dome. Keep the asked object distinct from clues.
+For WHAT something is, preserve the unknown object descriptively without guessing
+its identity. For an unknown support, the supported object is a reference.
+Use only the question. A part must be an actual physical item, never the requested
+color or another property. The complete question is retained for identity and relations.
 Question: {question}
 JSON:"""
