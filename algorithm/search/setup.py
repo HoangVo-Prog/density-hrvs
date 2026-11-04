@@ -44,6 +44,21 @@ def _resolve_sam_prompt(
     """
     if not settings.get("rewrite_sam_prompt", True):
         return
+    if settings.get("detector_prompt_mode") == "references":
+        resolver = getattr(scorer, "resolve_references", None)
+        if not callable(resolver):
+            raise ValueError("Reference mode requires Qwen resolve_references")
+        plan = invoke_counted(resolver, question or query,
+            on_request=lambda: charge_generation(usage, "resolver"))
+        settings["reference_plan"] = plan
+        settings["reference_detections"] = []
+        if not plan["references"]:
+            settings["max_iterations"] = 1  # Nothing to send to SAM3; do not invent a target fallback.
+        settings["sam_prompt"] = "; ".join(r["prompt"] for r in plan["references"])
+        usage["local_prompt_calls"] = usage.get("local_prompt_calls", 0) + 1
+        on_event("references_resolved", "Qwen selected separate reference-object prompts.",
+                 {"original_question": question, "reference_plan": plan})
+        return
     if settings.get("detector_prompt_mode") == "locating_statement":
         rewriter = getattr(scorer, "locate_statement", None)
         if not callable(rewriter):

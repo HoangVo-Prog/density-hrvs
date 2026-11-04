@@ -259,7 +259,7 @@ def main() -> None:
 
         return call
 
-    for prompt_method in ("locate_statement", "rewrite", "resolve", "resolve_structured", "compare_candidates", "answer", "answer_evidence"):
+    for prompt_method in ("resolve_references", "locate_statement", "rewrite", "resolve", "resolve_structured", "compare_candidates", "answer", "answer_evidence"):
         method = getattr(qwen, prompt_method, None)
         if callable(method):
             setattr(score, prompt_method, guarded(method))
@@ -349,6 +349,8 @@ def main() -> None:
             outcome["final_answer"] = result.get("final_answer", result.get("abstention", {})).get("answer", "")
             outcome["warnings"] = result.get("warnings", [])
             save_search_result(result, image, folder / "run")
+            from ..reporting.reference_views import save_reference_views
+            save_reference_views(result, image, folder / "references")
             inspection = make_inspection(
                 folder / "run",
                 folder / "inspection",

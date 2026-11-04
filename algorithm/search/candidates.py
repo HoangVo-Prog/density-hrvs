@@ -276,7 +276,7 @@ def verify_region_candidates(
     candidates: list[CandidatePrompt] = [
         {
             "index": index + 1,
-            "label": label,
+            "label": detection.get("prompt", label),
             "confidence": detection["sam3_score"] if detection["sam3_score"] is not None else detection.get("detector_score"),
             "bbox": detection["bbox"],
         }

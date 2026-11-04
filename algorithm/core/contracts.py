@@ -206,6 +206,8 @@ class SearchConfig(TypedDict):
     primary_detector: NotRequired[str]
     detector_prompt_mode: NotRequired[str]
     detector_statement: NotRequired[str]
+    reference_plan: NotRequired[dict]
+    reference_detections: NotRequired[list[dict]]
     llmdet_cache_dir: NotRequired[str]
     llmdet_threshold: NotRequired[float]
     feature_cache_root: NotRequired[str]

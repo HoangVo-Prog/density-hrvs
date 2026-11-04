@@ -267,6 +267,15 @@ def load_qwen_scorer(device: str = "auto", *, model_id: str = QWEN_MODEL,
         return clean_sam_prompt(_generate_text(prompt, 64))
 
     @torch.inference_mode()
+    def resolve_references(question: str, *, on_request: Callable = _ignore_request) -> dict:
+        from ..core.reference_prompts import REFERENCE_PROMPT, parse_reference_plan
+        plan, raw, prompt = generate_rating(
+            lambda current: _generate_text(current, 768), parse_reference_plan,
+            REFERENCE_PROMPT + json.dumps(question), on_request,
+            'Return one JSON object with target and references. Each reference has prompt and context.')
+        return {**plan, 'raw_response': raw, 'resolver_prompt': prompt}
+
+    @torch.inference_mode()
     def locate_statement(question: str, *, on_request: Callable = _ignore_request) -> str:
         prompt = """Rewrite the question as ONE locating instruction beginning with Locate.
 Preserve the exact target part, owner, all known descriptive attributes, reference
@@ -387,6 +396,7 @@ Question: """ + json.dumps(question)
     setattr(score, "quantization", quantization)
     setattr(score, "compare_candidates", compare_candidates)
     setattr(score, "locate_statement", locate_statement)
+    setattr(score, "resolve_references", resolve_references)
     setattr(score, "resolve_structured", resolve_structured)
     setattr(score, "answer_evidence", answer_evidence)
     setattr(score, "rewrite", rewrite)

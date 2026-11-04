@@ -69,6 +69,14 @@ def placeholder_rating(
 
 def candidate_query_text(state: RunState) -> str:
     """Choose the full query or detector phrase for candidate evidence sheets."""
+    if state.settings.get("detector_prompt_mode") == "references":
+        refs = state.settings["reference_plan"]["references"]
+        return ("Verify a REFERENCE object used to locate the requested target. "
+                "The candidate box is a reference, NOT the requested target. "
+                "Check its known attributes and location against these reference descriptions: "
+                + json.dumps(refs) + ". Do not require the box to enclose the final target. "
+                "Do not mistake a similar object elsewhere for the required reference. "
+                "Original question: " + state.question)
     plan = state.settings.get("query_plan") if state.settings.get("structured_query", False) else None
     if plan and plan.get("attribute_region"):
         return (f"Identify the owning/reference entity: {plan['entity']['concept']}. "
@@ -156,8 +164,25 @@ def detect_region(
                 "proposal_limit": state.settings["max_proposals_per_node"],
             },
         )
-        state.usage["primary_detector_calls"] = state.usage.get("primary_detector_calls", 0) + 1
-        detections = state.detector(pixels, state.settings["sam_prompt"] or state.query)
+        if state.settings.get("detector_prompt_mode") == "references":
+            detections = []
+            for reference in state.settings["reference_plan"]["references"]:
+                state.usage["primary_detector_calls"] = state.usage.get("primary_detector_calls", 0) + 1
+                state.usage["reference_detector_calls"] = state.usage.get("reference_detector_calls", 0) + 1
+                found = state.detector(pixels, reference["prompt"])
+                for detection in found:
+                    detection = {**detection, "reference_id": reference["id"],
+                                 "prompt": reference["prompt"], "proposal_role": "reference"}
+                    detections.append(detection)
+                    x, y, _, _ = node["bbox"]
+                    a, b, c, d = detection["bbox"]
+                    state.settings["reference_detections"].append({
+                        "node_id": node["node_id"], "reference_id": reference["id"],
+                        "prompt": reference["prompt"], "bbox": [x+a, y+b, x+c, y+d],
+                        "sam3_score": detection["sam3_score"], "proposal_role": "reference"})
+        else:
+            state.usage["primary_detector_calls"] = state.usage.get("primary_detector_calls", 0) + 1
+            detections = state.detector(pixels, state.settings["sam_prompt"] or state.query)
         if not detections:
             detections = recover_empty_region(state, node, pixels)
         state.detection_cache[node["node_id"]] = sorted(

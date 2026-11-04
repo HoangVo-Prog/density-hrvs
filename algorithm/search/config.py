@@ -239,8 +239,13 @@ def _validate_thresholds(config: SearchConfig) -> None:
 def _validate_strategy(config: SearchConfig) -> None:
     if config.get("primary_detector", "sam3") not in {"sam3", "llmdet"}:
         raise ValueError("Unknown primary detector")
-    if config.get("detector_prompt_mode", "category") not in {"category", "locating_statement"}:
+    if config.get("detector_prompt_mode", "category") not in {"category", "locating_statement", "references"}:
         raise ValueError("Unknown detector prompt mode")
+    if config.get("detector_prompt_mode") == "references":
+        if config.get("primary_detector", "sam3") != "sam3":
+            raise ValueError("Reference mode requires SAM3")
+        if config.get("part_refinement") or config.get("grounding_dino_fallback") or config.get("discovery_mode", "off") != "off":
+            raise ValueError("Reference mode requires target/part detector paths and legacy discovery off")
     if config.get("primary_detector") == "llmdet":
         if config.get("part_refinement"):
             raise ValueError("Direct LLMDet target statements require separate part refinement off")
