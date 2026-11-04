@@ -217,6 +217,7 @@ class SearchConfig(TypedDict):
     structured_query: NotRequired[bool]
     query_plan: NotRequired[dict]
     part_refinement: NotRequired[bool]
+    part_crop_retry: NotRequired[bool]
     finalization_reserve: NotRequired[int]
     max_part_detector_calls: NotRequired[int]
     part_candidate_limit: NotRequired[int]

@@ -69,6 +69,13 @@ def placeholder_rating(
 
 def candidate_query_text(state: RunState) -> str:
     """Choose the full query or detector phrase for candidate evidence sheets."""
+    plan = state.settings.get("query_plan") if state.settings.get("structured_query", False) else None
+    if plan and plan.get("attribute_region"):
+        return (f"Identify the owning/reference entity: {plan['entity']['concept']}. "
+                f"The requested {plan['attribute_region']['concept']} will be inspected separately. "
+                "At this stage verify the owner's identity and the required spatial/reference relations. "
+                "A whole-owner rectangle is intentional; do not reject it merely for enclosing more than the part. "
+                f"Original question: {state.question}")
     if state.settings.get("candidate_query_mode", "full") == "target_phrase":
         return state.settings["sam_prompt"] or state.query
     return state.query

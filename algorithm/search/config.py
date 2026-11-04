@@ -91,6 +91,7 @@ def default_search_config() -> SearchConfig:
         "rerank_candidate_limit": 5,
         "structured_query": False,
         "part_refinement": False,
+        "part_crop_retry": False,
         "finalization_reserve": 4,
         "max_part_detector_calls": 1,
         "part_candidate_limit": 3,
@@ -160,7 +161,7 @@ def _validate_candidate_settings(config: SearchConfig) -> None:
         raise ValueError("candidate_query_mode must be 'full' or 'target_phrase'")
     if not isinstance(config.get("answer_question", True), bool):
         raise ValueError("answer_question must be a boolean")
-    for flag in ("require_verified_answer", "strict_fallback_limit", "structured_query", "part_refinement", "comparative_reranking", "grounding_dino_fallback"):
+    for flag in ("require_verified_answer", "strict_fallback_limit", "structured_query", "part_refinement", "comparative_reranking", "grounding_dino_fallback", "part_crop_retry"):
         if not isinstance(config.get(flag, True), bool):
             raise ValueError(f"{flag} must be a boolean")
     if config.get("answer_view", "legacy_crop") not in {"marked_detail", "legacy_crop"}:
@@ -179,6 +180,9 @@ def _validate_candidate_settings(config: SearchConfig) -> None:
             raise ValueError(f"{name} must be in [0, 1]")
     if type(config.get("fallback_proposal_limit", 8)) is not int or config.get("fallback_proposal_limit", 8) < 1:
         raise ValueError("fallback_proposal_limit must be a positive integer")
+    if config.get("part_crop_retry", False) and (
+        not config.get("part_refinement", False) or config.get("max_part_detector_calls", 1) < 2):
+        raise ValueError("part_crop_retry requires part_refinement and max_part_detector_calls >= 2")
     answer_padding = config.get("answer_context_padding", 384)
     if type(answer_padding) is not int or answer_padding < 0:
         raise ValueError("answer_context_padding must be a nonnegative integer")

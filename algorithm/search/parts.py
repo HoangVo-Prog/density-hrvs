@@ -40,15 +40,34 @@ def refine_answer_part(state, result) -> None:
         return
     folder = state.artifacts/'parts' if state.artifacts is not None else None
     if folder is not None: folder.mkdir(parents=True, exist_ok=True)
-    old_folder, old_node = state.context.folder, state.context.node_id
-    tick = time.perf_counter()
-    state.usage['part_detector_calls'] = used + 1
-    state.context.folder, state.context.node_id = folder, -1
-    try:
-        detections = state.detector(state.rgb[y0:y1,x0:x1].copy(), part['concept'])
-    finally:
-        state.context.folder, state.context.node_id = old_folder, old_node
-        state.record_cost('detect', time.perf_counter()-tick)
+    attempts=[]
+    def detect_window(bounds):
+        left,top,right,bottom=bounds
+        attempt_folder = folder/f'attempt_{len(attempts)+1:02d}' if folder is not None else None
+        if attempt_folder is not None:
+            attempt_folder.mkdir(parents=True,exist_ok=True)
+            state.source_image.crop(bounds).save(attempt_folder/'input.png')
+        old_folder,old_node=state.context.folder,state.context.node_id
+        state.context.folder,state.context.node_id=attempt_folder,-1
+        state.usage['part_detector_calls']=state.usage.get('part_detector_calls',0)+1
+        tick=time.perf_counter()
+        try:
+            found=state.detector(state.rgb[top:bottom,left:right].copy(),part['concept'])
+        finally:
+            state.context.folder,state.context.node_id=old_folder,old_node
+            state.record_cost('detect',time.perf_counter()-tick)
+        attempts.append({'source_bbox':bounds,'prompt':part['concept'],
+                         'candidate_count':len(found)})
+        return found
+    detections=detect_window(window)
+    if (not detections and state.settings.get('part_crop_retry',False)
+            and state.usage.get('part_detector_calls',0)<limit
+            and state.remaining_final_generations()!=0):
+        expanded=padded_bbox(bbox,state.source_image.size,2*padding)
+        if expanded!=window:
+            window=expanded
+            x0,y0,x1,y1=window
+            detections=detect_window(window)
     if not detections:
         detections = fallback_boxes(state, state.rgb[y0:y1,x0:x1].copy(), part["concept"],
             reason="empty_requested_part", source_bbox=window)
@@ -88,6 +107,6 @@ def refine_answer_part(state, result) -> None:
             # The primary proposal bbox stays fixed; only answer detail uses the part.
             break
     result['part_refinement']={'status':'verified' if best.get('attribute_bbox') else 'unresolved',
-                               'entity_bbox':bbox,'concept':part['concept'],'candidates':records}
+                               'entity_bbox':bbox,'concept':part['concept'],'detector_attempts':attempts,'candidates':records}
     if folder is not None:
         (folder/'results.json').write_text(json.dumps(result['part_refinement'],indent=2)+'\n')

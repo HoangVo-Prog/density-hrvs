@@ -1,5 +1,7 @@
 import json
 from types import SimpleNamespace
+from types import SimpleNamespace
+from algorithm.search.evaluation import candidate_query_text
 import unittest
 
 from algorithm.core.query_plan import parse_query_plan
@@ -16,6 +18,16 @@ def badge_plan():
 
 
 class QueryPlanTests(unittest.TestCase):
+    def test_owner_stage_uses_full_relations_without_demanding_a_part_sized_box(self):
+        question='What color is the badge of the man right of the woman in blue?'
+        state=SimpleNamespace(settings={'structured_query':True,'query_plan':{
+            'entity':{'concept':'man'},'attribute_region':{'concept':'badge'}}},
+            question=question,query='original search description')
+        query=candidate_query_text(state)
+        self.assertIn(question,query)
+        self.assertIn('owning/reference entity: man',query)
+        self.assertIn('badge will be inspected separately',query)
+
     def test_entity_part_and_reference_remain_distinct(self):
         plan=parse_query_plan(json.dumps(badge_plan()))
         self.assertEqual(plan['entity']['concept'],'man in dark polo shirt')

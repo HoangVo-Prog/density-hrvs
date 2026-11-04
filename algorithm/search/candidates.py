@@ -307,7 +307,7 @@ def verify_region_candidates(
     try:
         assessment = verifier(
             sheet,
-            state.query,
+            candidate_query_text(state),
             candidates,
             on_request=state.charge_local,
         )

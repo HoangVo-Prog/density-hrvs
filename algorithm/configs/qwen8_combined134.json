@@ -1,0 +1,23 @@
+{
+  "qwen_model": "Qwen/Qwen3-VL-8B-Instruct",
+  "qwen_revision": "0c351dd01ed87e9c1b53cbc748cba10e6187ff3b",
+  "qwen_cache_dir": "/media/tinhanhnguyen/sub/model_cache",
+  "qwen_quantization": "nf4",
+  "device": "cuda",
+  "answer_view": "legacy_crop",
+  "max_local_scores": 32,
+  "verification_mode": "region",
+  "model_residency": "staged",
+  "structured_query": true,
+  "part_refinement": true,
+  "comparative_reranking": false,
+  "grounding_dino_fallback": true,
+  "require_verified_answer": true,
+  "strict_fallback_limit": true,
+  "part_crop_retry": true,
+  "fallback_cache_dir": "/media/tinhanhnguyen/sub/model_cache",
+  "max_fallback_detector_calls": 2,
+  "max_part_detector_calls": 2,
+  "part_candidate_limit": 3,
+  "finalization_reserve": 6
+}
