@@ -335,7 +335,7 @@ Question: """ + json.dumps(question)
         )
         expected = [candidate["index"] for candidate in candidates]
         assessment, text, final_prompt = generate_rating(
-            lambda current: _generate_image_text(image, current, 512),
+            lambda current: _generate_image_text(image, current, 512 if len(candidates) <= 5 else min(2048, 128 * len(candidates))),
             lambda reply: parse_region_assessment(reply, expected), prompt, on_request,
             "Return only valid JSON with a full ranking and every candidate index exactly once.",
         )

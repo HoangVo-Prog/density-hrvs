@@ -288,7 +288,8 @@ def main() -> None:
             def proposal_call():
                 return exec_sam3_on_image(pixels, sam, sam_processor, prompt=concept,
                     threshold=settings["sam3_threshold"], mask_threshold=settings["mask_threshold"],
-                    max_detections=settings["max_proposals_per_node"])
+                    max_detections=settings["max_proposals_per_node"],
+                    fallback_top_k=settings.get("sam3_fallback_top_k", 0))
             return staged_callable(proposal_call, sam.to, compute_device)() if staging else proposal_call()
 
     def execute(question: Question) -> Outcome:

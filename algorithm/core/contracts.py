@@ -69,6 +69,8 @@ class SAM3Detection(TypedDict):
     mask: NDArray[np.bool_]  # Binary mask with the supplied image's spatial shape.
     image: NDArray[np.uint8]  # RGB box crop from the supplied image.
     prompt: str  # Text concept passed to SAM3.
+    sam3_selection: NotRequired[str]
+    sam3_original_threshold: NotRequired[float]
 
 
 class SAM3Region(SAM3Detection):
@@ -206,6 +208,7 @@ class SearchConfig(TypedDict):
     primary_detector: NotRequired[str]
     detector_prompt_mode: NotRequired[str]
     detector_statement: NotRequired[str]
+    sam3_fallback_top_k: NotRequired[int]
     reference_plan: NotRequired[dict]
     reference_detections: NotRequired[list[dict]]
     llmdet_cache_dir: NotRequired[str]

@@ -155,6 +155,7 @@ def exec_sam3_on_image(
     mask_threshold: float = 0.5,
     max_detections: int = 0,
     on_candidates: Callable[[list[SAM3CandidateRecord]], None] | None = None,
+    fallback_top_k: int = 0,
 ) -> list[SAM3Detection]:
     """Return detections in input-crop coordinates, with exclusive box maxima.
 
@@ -169,8 +170,12 @@ def exec_sam3_on_image(
             zero retains all detections. Full-resolution mask resizing uses CPU
             batches to avoid allocating a 4K mask stack on the GPU.
         on_candidates: Optional observer for every native box before NMS.
+        fallback_top_k: If no score exceeds threshold, retain this many highest
+            raw boxes before NMS, preserving their actual scores. Zero disables.
     """
     _validate_inputs(prompt, threshold, mask_threshold, max_detections)
+    if type(fallback_top_k) is not int or fallback_top_k < 0:
+        raise ValueError("fallback_top_k must be a nonnegative integer")
 
     pil_image = to_pil_rgb(image)
     rgb = np.asarray(pil_image)
@@ -191,9 +196,20 @@ def exec_sam3_on_image(
         scores = scores * outputs.presence_logits.sigmoid()
 
     indices = _retained_indices(scores, threshold, max_detections)
+    used_fallback = len(indices) == 0 and fallback_top_k > 0
+    if used_fallback:
+        count = min(fallback_top_k, scores.shape[1])
+        if max_detections:
+            count = min(count, max_detections)
+        indices = scores[0].argsort(descending=True)[:count]
     if on_candidates is not None:
         retained = set(indices.detach().cpu().tolist())
-        on_candidates(_candidate_records(outputs, scores, threshold, retained))
+        records = _candidate_records(outputs, scores, threshold, retained)
+        if used_fallback:
+            for record in records:
+                if record["retained"]:
+                    record["decision"] = "top_k_fallback"
+        on_candidates(records)
 
     detections: list[SAM3Detection] = []
     for batch in indices.split(4):
@@ -201,11 +217,15 @@ def exec_sam3_on_image(
             outputs,
             processor,
             batch,
-            threshold,
+            -1.0 if used_fallback else threshold,
             mask_threshold,
             (height, width),
         )
-        detections.extend(_detections_from_result(result, rgb, prompt))
+        found = _detections_from_result(result, rgb, prompt)
+        for detection in found:
+            detection["sam3_selection"] = "top_k_fallback" if used_fallback else "above_threshold"
+            detection["sam3_original_threshold"] = threshold
+        detections.extend(found)
     return sorted(
         detections,
         key=lambda record: record["sam3_score"] or 0.0,

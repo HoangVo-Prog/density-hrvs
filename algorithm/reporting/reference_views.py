@@ -33,7 +33,7 @@ def save_reference_views(result, pixels, output):
         refs.append({**ref, 'boxes': unique, 'image':filename, 'color':color})
     combined.thumbnail((1920,1920));combined.save(output/'all_references.jpg')
     payload = {'question':result.get('final_answer',{}).get('question',result['query']), 'target':plan['target'],
-               'references':refs, 'final_answer':result.get('final_answer',{}).get('answer',result.get('abstention',{}).get('answer','Uncertain')),
+               'references':refs, 'final_answer':result.get('final_answer',{}).get('answer',result.get('abstention',{}).get('answer','Not generated')),
                'note':'Boxes localize reference objects, not the requested target. Final answer uses the existing padded crop and original question.'}
     (output/'references.json').write_text(json.dumps(payload,indent=2)+'\n')
     body = ''.join('<h2>'+html.escape(r['prompt'])+'</h2><p>'+html.escape(r['context'])+f' | {len(r["boxes"])} boxes</p><img src="'+r['image']+'">' for r in refs)

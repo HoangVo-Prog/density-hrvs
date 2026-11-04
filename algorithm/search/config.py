@@ -27,6 +27,7 @@ def default_search_config() -> SearchConfig:
         "cost_weight": 0.2,
         "reference_cost_seconds": 10.0,
         "sam3_threshold": 0.1,
+        "sam3_fallback_top_k": 0,
         "mask_threshold": 0.5,
         "sam_prompt": "",
         "rewrite_sam_prompt": True,
@@ -231,6 +232,11 @@ def _validate_allocation(config: SearchConfig) -> None:
 
 
 def _validate_thresholds(config: SearchConfig) -> None:
+    top_k = config.get("sam3_fallback_top_k", 0)
+    if type(top_k) is not int or top_k < 0 or top_k > 200:
+        raise ValueError("sam3_fallback_top_k must be an integer from 0 through 200")
+    if top_k and config["max_proposals_per_node"] and config["max_proposals_per_node"] < top_k:
+        raise ValueError("max_proposals_per_node must accommodate sam3_fallback_top_k")
     for name in ("sam3_threshold", "mask_threshold", "match_threshold"):
         if not math.isfinite(config[name]) or not 0 <= config[name] <= 1:
             raise ValueError(f"{name} must be between zero and one.")

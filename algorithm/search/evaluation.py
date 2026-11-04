@@ -179,7 +179,10 @@ def detect_region(
                     state.settings["reference_detections"].append({
                         "node_id": node["node_id"], "reference_id": reference["id"],
                         "prompt": reference["prompt"], "bbox": [x+a, y+b, x+c, y+d],
-                        "sam3_score": detection["sam3_score"], "proposal_role": "reference"})
+                        "sam3_score": detection["sam3_score"], "proposal_role": "reference",
+                        "sam3_selection": detection.get("sam3_selection", "above_threshold")})
+                if any(d.get("sam3_selection") == "top_k_fallback" for d in found):
+                    state.usage["sam3_top_k_fallback_calls"] = state.usage.get("sam3_top_k_fallback_calls", 0) + 1
         else:
             state.usage["primary_detector_calls"] = state.usage.get("primary_detector_calls", 0) + 1
             detections = state.detector(pixels, state.settings["sam_prompt"] or state.query)
@@ -191,6 +194,8 @@ def detect_region(
                 for detection in detections
                 if detection["sam3_score"] is None
                 or detection["sam3_score"] > state.settings["sam3_threshold"]
+                or (state.settings.get("sam3_fallback_top_k", 0) > 0
+                    and detection.get("sam3_selection") == "top_k_fallback")
             ],
             key=lambda detection: detection["sam3_score"] if detection["sam3_score"] is not None else detection.get("detector_score", 0.0),
             reverse=True,

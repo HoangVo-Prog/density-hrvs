@@ -249,6 +249,7 @@ def _load_detector(
             mask_threshold=settings["mask_threshold"],
             max_detections=settings["max_proposals_per_node"],
             on_candidates=save_candidates,
+            fallback_top_k=settings.get("sam3_fallback_top_k", 0),
         )
 
     return staged_callable(detector, model.to, device) if staging else detector
