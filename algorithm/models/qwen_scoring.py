@@ -267,6 +267,23 @@ def load_qwen_scorer(device: str = "auto", *, model_id: str = QWEN_MODEL,
         return clean_sam_prompt(_generate_text(prompt, 64))
 
     @torch.inference_mode()
+    def locate_statement(question: str, *, on_request: Callable = _ignore_request) -> str:
+        prompt = """Rewrite the question as ONE locating instruction beginning with Locate.
+Preserve the exact target part, owner, all known descriptive attributes, reference
+objects, location and spatial relationships. Remove the request for an unknown
+answer such as color. Never invent the answer or add a target color not given.
+Do not shorten the target to its category. No explanation or quotation marks.
+Example: What color is the cargo bed of the pickup diagonally above and to the
+left of the turquoise car on the bottom approach?
+Output: Locate the cargo bed of the pickup diagonally above and to the left of the turquoise car on the bottom approach.
+Question: """ + json.dumps(question)
+        on_request()
+        result = _generate_text(prompt, 192).strip().strip('"')
+        if not result.lower().startswith("locate ") or "?" in result or "\n" in result:
+            raise ValueError("Qwen did not return one locating instruction")
+        return result
+
+    @torch.inference_mode()
     def resolve(query: str, *, on_request: Callable = _ignore_request) -> str:
         prompt = TARGET_RESOLVER_PROMPT.format(query=json.dumps(query))
         on_request()
@@ -369,6 +386,7 @@ def load_qwen_scorer(device: str = "auto", *, model_id: str = QWEN_MODEL,
     setattr(score, "model_revision", revision)
     setattr(score, "quantization", quantization)
     setattr(score, "compare_candidates", compare_candidates)
+    setattr(score, "locate_statement", locate_statement)
     setattr(score, "resolve_structured", resolve_structured)
     setattr(score, "answer_evidence", answer_evidence)
     setattr(score, "rewrite", rewrite)

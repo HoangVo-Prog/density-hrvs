@@ -237,6 +237,16 @@ def _validate_thresholds(config: SearchConfig) -> None:
 
 
 def _validate_strategy(config: SearchConfig) -> None:
+    if config.get("primary_detector", "sam3") not in {"sam3", "llmdet"}:
+        raise ValueError("Unknown primary detector")
+    if config.get("detector_prompt_mode", "category") not in {"category", "locating_statement"}:
+        raise ValueError("Unknown detector prompt mode")
+    if config.get("primary_detector") == "llmdet":
+        if config.get("part_refinement"):
+            raise ValueError("Direct LLMDet target statements require separate part refinement off")
+        threshold = config.get("llmdet_threshold", .25)
+        if not math.isfinite(threshold) or not 0 <= threshold <= 1:
+            raise ValueError("Invalid LLMDet threshold")
     if config["strategy"] not in {"agent-uct", "uct", "greedy", "bfs"}:
         raise ValueError("Unknown search strategy.")
     if config.get("partition_mode", "semantic") not in {"semantic", "spatial", "adjacent_merge"}:

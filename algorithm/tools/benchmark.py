@@ -224,7 +224,13 @@ def main() -> None:
     if staging:
         qwen = staged_scorer(qwen, compute_device)
     settings["scoring_backend"] = f"{qwen.model_id}@{qwen.model_revision}:{qwen.quantization}"
-    sam, sam_processor = load_sam3_model(vision_device)
+    llmdet = None
+    if settings.get("primary_detector", "sam3") == "llmdet":
+        from ..models.llmdet import LLMDetDetector
+        llmdet = LLMDetDetector(device=compute_device, cache_dir=settings.get("llmdet_cache_dir"),
+            threshold=settings.get("llmdet_threshold", .25), limit=settings["max_proposals_per_node"], staged=staging)
+    else:
+        sam, sam_processor = load_sam3_model(vision_device)
     gpu_lock = threading.Lock()
 
     def features(pixels: NDArray) -> NDArray[np.float32]:
@@ -253,7 +259,7 @@ def main() -> None:
 
         return call
 
-    for prompt_method in ("rewrite", "resolve", "resolve_structured", "compare_candidates", "answer", "answer_evidence"):
+    for prompt_method in ("locate_statement", "rewrite", "resolve", "resolve_structured", "compare_candidates", "answer", "answer_evidence"):
         method = getattr(qwen, prompt_method, None)
         if callable(method):
             setattr(score, prompt_method, guarded(method))
@@ -277,6 +283,8 @@ def main() -> None:
 
     def detect(pixels: NDArray, concept: str) -> list[SAM3Detection]:
         with gpu_lock:
+            if llmdet is not None:
+                return llmdet(pixels, concept)
             def proposal_call():
                 return exec_sam3_on_image(pixels, sam, sam_processor, prompt=concept,
                     threshold=settings["sam3_threshold"], mask_threshold=settings["mask_threshold"],

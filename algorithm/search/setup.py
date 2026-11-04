@@ -44,6 +44,20 @@ def _resolve_sam_prompt(
     """
     if not settings.get("rewrite_sam_prompt", True):
         return
+    if settings.get("detector_prompt_mode") == "locating_statement":
+        rewriter = getattr(scorer, "locate_statement", None)
+        if not callable(rewriter):
+            raise ValueError("Locating-statement mode requires Qwen's locate_statement method")
+        statement = invoke_counted(rewriter, question or query,
+            on_request=lambda: charge_generation(usage, "resolver"))
+        if not isinstance(statement, str) or not statement.lower().startswith("locate "):
+            raise ValueError("Invalid locating statement; refusing category fallback")
+        settings["sam_prompt"] = statement
+        settings["detector_statement"] = statement
+        usage["local_prompt_calls"] = usage.get("local_prompt_calls", 0) + 1
+        on_event("query_resolved", "Qwen rewrote the question into a full locating statement.",
+                 {"original_question": question, "detector_statement": statement})
+        return
     if settings.get("structured_query", False):
         structured = getattr(scorer, "resolve_structured", None)
         if callable(structured):
@@ -178,6 +192,11 @@ def _load_detector(
     progress: Callable[[str], None],
     on_event: EventSink,
 ) -> Detector:
+    if settings.get("primary_detector", "sam3") == "llmdet":
+        from ..models.llmdet import LLMDetDetector
+        return LLMDetDetector(device="cuda" if settings["device"] == "auto" else settings["device"],
+            cache_dir=settings.get("llmdet_cache_dir"), threshold=settings.get("llmdet_threshold", .25),
+            limit=settings["max_proposals_per_node"], staged=settings.get("model_residency") == "staged")
     progress("Loading local SAM3; Qwen will verify candidate evidence sheets.")
     on_event(
         "model_loading",

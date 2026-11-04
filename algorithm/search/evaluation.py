@@ -167,7 +167,7 @@ def detect_region(
                 if detection["sam3_score"] is None
                 or detection["sam3_score"] > state.settings["sam3_threshold"]
             ],
-            key=lambda detection: detection["sam3_score"] or 0.0,
+            key=lambda detection: detection["sam3_score"] if detection["sam3_score"] is not None else detection.get("detector_score", 0.0),
             reverse=True,
         )
         state.record_cost("detect", time.perf_counter() - tick)

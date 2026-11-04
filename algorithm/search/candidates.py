@@ -139,7 +139,7 @@ def verify_candidate(
     )
     state.on_event(
         "candidate_verification_started",
-        f"N{node['node_id']}: verify SAM3 candidate {rank} ({detection['sam3_score'] or 0:.3f}).",
+        f"N{node['node_id']}: verify detector candidate {rank} ({detection['sam3_score'] or 0:.3f}).",
         {
             "node_id": node["node_id"],
             "candidate_rank": rank,
@@ -277,7 +277,7 @@ def verify_region_candidates(
         {
             "index": index + 1,
             "label": label,
-            "confidence": detection["sam3_score"],
+            "confidence": detection["sam3_score"] if detection["sam3_score"] is not None else detection.get("detector_score"),
             "bbox": detection["bbox"],
         }
         for index, detection in enumerate(subset)
