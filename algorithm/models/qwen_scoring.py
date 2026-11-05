@@ -16,8 +16,6 @@ from .scoring import (
     SCORING_PROMPT,
     ScoringView,
     _ignore_request,
-    parse_region_assessment,
-    parse_verifier_score,
 )
 
 QWEN_MODEL = "Qwen/Qwen3-VL-2B-Instruct"
@@ -373,7 +371,42 @@ Question: """ + json.dumps(question)
         on_request()
         return clean_sam_prompt(_generate_text(prompt, 32))
 
+    token_ids = [processor.tokenizer.encode(text, add_special_tokens=False) for text in ("Yes", "No")]
+    assert all(len(ids) == 1 for ids in token_ids), token_ids
+    token_ids = [ids[0] for ids in token_ids]
+
     @torch.inference_mode()
+    @torch.inference_mode()
+    def probability(image, instruction, query, target):
+        prompt = instruction.replace(
+            "First identify the boxed object and name it explicitly in reason.",
+            "Assess only the cyan-boxed object.",
+        ) + (
+            f"\nSearch description: {json.dumps(query)}\n"
+            f"Does {target} match the complete search description? "
+            "Answer Yes only when all required attributes and relations are visibly supported. "
+            "Otherwise answer No, including when evidence is insufficient. "
+            "Return only Yes or No, without JSON, a numeric rating, or an explanation.\nAnswer:"
+        )
+        messages = [{"role": "user", "content": [
+            {"type": "image", "image": image.convert("RGB")},
+            {"type": "text", "text": prompt},
+        ]}]
+        inputs = processor.apply_chat_template(
+            messages, tokenize=True, add_generation_prompt=True,
+            return_dict=True, return_tensors="pt",
+        ).to(selected)
+        logits = model(**inputs, logits_to_keep=1, use_cache=False).logits[0, -1].float()
+        binary = logits[token_ids].softmax(0)
+        mass = (logits[token_ids].logsumexp(0) - logits.logsumexp(0)).exp().item()
+        p_yes = binary[0].item()
+        score.probability_forwards += 1
+        return {"score": p_yes, "p_yes": p_yes, "yes_no_mass": mass,
+                "answer": "Yes" if p_yes >= 0.5 else "No",
+                "reason": "Yes/No-normalized next-token probability; no self-rating generated.",
+                "model_id": model_id, "model_revision": revision,
+                "prompt": prompt, "input_size": image.size}
+
     def score(
         image: Image.Image,
         query: str,
@@ -381,21 +414,12 @@ Question: """ + json.dumps(question)
         view_type: ScoringView = "region",
         on_request: Callable[[], None] = _ignore_request,
     ) -> VerifierScore:
-        prompt = (
-            (CONTEXT_INSTRUCTIONS if view_type == "context_detail" else "")
-            + SCORING_PROMPT
-            + json.dumps(query)
-        )
-        rating, text, final_prompt = generate_rating(
-            lambda current: _generate_image_text(image, current, 256),
-            parse_verifier_score, prompt, on_request,
-            'Return only valid JSON, for example {"answer":"Uncertain","score":30,"reason":"Required detail is unclear."}.',
-        )
-        return {**rating, "model_id": model_id, "raw_response": text,
-                "prompt": final_prompt, "input_size": image.size,
-                "model_revision": revision}
+        instruction = (CONTEXT_INSTRUCTIONS if view_type == "context_detail" else "")
+        instruction += SCORING_PROMPT.split("Return ONLY one JSON object", 1)[0]
+        target = "the cyan-boxed target" if view_type == "context_detail" else "this image"
+        on_request()
+        return probability(image, instruction, query, target)
 
-    @torch.inference_mode()
     def score_candidates(
         image: Image.Image,
         query: str,
@@ -403,25 +427,18 @@ Question: """ + json.dumps(question)
         *,
         on_request: Callable[[], None] = _ignore_request,
     ) -> RegionAssessment:
-        """Assess and rank the numbered SAM3 boxes on the whole cluster image."""
-        prompt = REGION_CANDIDATES_PROMPT.format(
-            candidates=json.dumps(candidates, indent=2),
-            query=json.dumps(query),
+        instruction = REGION_CANDIDATES_PROMPT.split("Rank the candidates explicitly.", 1)[0]
+        instruction += "\nCandidates:\n" + json.dumps(candidates, indent=2)
+        ratings = {}
+        for c in candidates:
+            on_request()
+            ratings[c["index"]] = probability(image, instruction, query, f"numbered candidate {c['index']}")
+        ranking = sorted(ratings, key=lambda index: ratings[index]["score"], reverse=True)
+        best = ranking[0]
+        ambiguous = ratings[best]["score"] < 0.5 or (
+            len(ranking) > 1 and ratings[best]["score"] - ratings[ranking[1]]["score"] < 0.05
         )
-        expected = [candidate["index"] for candidate in candidates]
-        assessment, text, final_prompt = generate_rating(
-            lambda current: _generate_image_text(image, current, 512 if len(candidates) <= 5 else min(2048, 128 * len(candidates))),
-            lambda reply: parse_region_assessment(reply, expected), prompt, on_request,
-            "Return only valid JSON with a full ranking and every candidate index exactly once.",
-        )
-        return {
-            "ranking": assessment["ranking"], "best_index": assessment["best_index"],
-            "ambiguous": assessment["ambiguous"],
-            "ratings": {index: {**rating, "model_id": model_id,
-                       "raw_response": text, "prompt": final_prompt,
-                       "input_size": image.size, "model_revision": revision}
-                       for index, rating in assessment["ratings"].items()},
-        }
+        return {"ratings": ratings, "ranking": ranking, "best_index": best, "ambiguous": ambiguous}
 
     @torch.inference_mode()
     def compare_candidates(image: Image.Image, query: str, count: int, *,
@@ -491,6 +508,7 @@ Question: """ + json.dumps(question)
     setattr(score, "resolve_structured", resolve_structured)
     setattr(score, "answer_evidence", answer_evidence)
     setattr(score, "answer_spatial", answer_spatial)
+    score.probability_forwards = 0
     setattr(score, "rewrite", rewrite)
     setattr(score, "resolve", resolve)
     setattr(score, "score_candidates", score_candidates)

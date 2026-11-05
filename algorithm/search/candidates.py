@@ -163,9 +163,7 @@ def verify_candidate(
             json.dumps(rating, indent=2)
         )
     fused = candidate_score(
-        rating["score"] if rating["answer"] != "No" else None,
-        detection["sam3_score"],
-        state.settings,
+        rating["score"], detection["sam3_score"], state.settings
     )
     check: CandidateCheck = {
         "rank": rank,
@@ -364,9 +362,7 @@ def verify_region_candidates(
         if global_box is None:
             continue
         fused = candidate_score(
-            rating["score"] if rating["answer"] != "No" else None,
-            detection["sam3_score"],
-            state.settings,
+            rating["score"], detection["sam3_score"], state.settings
         )
         region_checks[index] = {
             "rank": rank,

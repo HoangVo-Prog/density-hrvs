@@ -83,7 +83,7 @@ def aggregate_verified_region(
         (
             check["qwen"]["score"]
             for check in checks
-            if "qwen" in check and check["qwen"]["answer"] != "No"
+            if "qwen" in check and check["qwen"]["model_id"] != "not-run"
         ),
         default=0.0,
     )
@@ -91,6 +91,7 @@ def aggregate_verified_region(
         check
         for check in checks
         if "qwen" in check
+        and check["qwen"]["model_id"] != "not-run"
         and check["qwen"]["answer"] == "Yes"
         and check["qwen"]["score"] >= config.get("candidate_accept_score", 0.5)
     ]

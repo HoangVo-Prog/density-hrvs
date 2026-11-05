@@ -121,6 +121,7 @@ def answer_top_region(state: RunState, result: SearchResult) -> FinalAnswer | No
         "crop_bbox": crop_bbox,
         "proposal_score": best["score"],
         "model_id": getattr(state.local_scorer, "model_id", QWEN_MODEL),
+        "backend": getattr(state.local_scorer, "backend", "transformers"),
         "raw_response": raw,
         "prompt": prompt,
         "input_size": crop.size,

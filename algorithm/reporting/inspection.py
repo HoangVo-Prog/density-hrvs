@@ -7,7 +7,12 @@ import math
 import os
 from pathlib import Path
 import textwrap
-from typing import NotRequired, TypedDict, cast
+from typing import TypedDict, cast
+
+try:
+    from typing import NotRequired
+except ImportError:
+    from typing_extensions import NotRequired
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 

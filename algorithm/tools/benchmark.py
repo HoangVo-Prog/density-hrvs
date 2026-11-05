@@ -3,12 +3,19 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import html
+import hashlib
 import json
+import shutil
 from pathlib import Path
 import threading
 import torch
 from collections.abc import Callable
-from typing import NotRequired, TypedDict, cast
+from typing import TypedDict, cast
+
+try:
+    from typing import NotRequired
+except ImportError:
+    from typing_extensions import NotRequired
 
 import numpy as np
 from numpy.typing import NDArray
@@ -18,7 +25,9 @@ from ..core.contracts import CandidatePrompt, SAM3Detection, VerifierScore
 from ..core.data import load_dataset_image
 from ..core.dataset_manifest import load_inference_questions
 from ..reporting.inspection import make_inspection
-from ..models.qwen_scoring import load_qwen_scorer
+from ..models.qwen_scoring import QWEN_MODEL, QWEN_REVISION, load_qwen_scorer
+from ..models.vllm_scoring import DEFAULT_ENDPOINT, VLLM_MODELS, VllmScorer
+from ..search.region_scoring import bbox_iou
 from ..core.query import question_target
 from ..models.scoring import ScoringView, _ignore_request
 from ..models.cached_features import CachedFullImageFeatures
@@ -79,6 +88,19 @@ def compact_gallery(folder: Path) -> None:
             image.save(path, quality=85, optimize=True)
         else:
             image.save(path, optimize=True)
+
+
+def inspect_result(result, target, folder):
+    box = (target["x"], target["y"], target["x"] + target["width"], target["y"] + target["height"]) if target else None
+    candidates = [{"bbox": p["bbox"], "score": p["score"],
+                   "target_iou": bbox_iou(tuple(p["bbox"]), box) if box else None}
+                  for p in result["ranked_regions"]]
+    record = {"target_bbox": box, "candidates": candidates,
+              "best_target_iou": max((c["target_iou"] for c in candidates), default=0.0) if box else None}
+    folder.mkdir(exist_ok=True)
+    (folder / "inspection.json").write_text(json.dumps(record, indent=2))
+    (folder / "index.html").write_text('<a href="inspection.json">Candidate boxes and post-hoc IoU</a>')
+    return record
 
 
 def main() -> None:
@@ -143,6 +165,10 @@ def main() -> None:
     parser.add_argument("--config-file", type=Path, help="JSON overrides applied after CLI defaults")
     parser.add_argument("--question-ids", nargs="+", help="Explicit question IDs, filtered before limits")
     parser.add_argument("--no-stages", action="store_true", help="Skip heavy per-node diagnostic images")
+    parser.add_argument("--vlm-backend", choices=("transformers", "vllm"), default="transformers")
+    parser.add_argument("--vlm-model", choices=tuple(VLLM_MODELS), default=QWEN_MODEL)
+    parser.add_argument("--vlm-endpoint", default=DEFAULT_ENDPOINT)
+    parser.add_argument("--lean-artifacts", action="store_true")
     args = parser.parse_args()
     if args.compact_existing:
         for checkpoint in sorted(args.output_dir.glob("*/completion.json")):
@@ -181,7 +207,6 @@ def main() -> None:
         questions = questions[: args.limit_questions]
     selected_ids = {q["image_id"] for q in questions}
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    (args.output_dir / "selection.json").write_text(json.dumps(questions, indent=2))
     settings = default_search_config()
     settings["max_api_calls"] = args.max_api_calls
     settings["max_local_scores"] = args.max_local_scores
@@ -201,6 +226,27 @@ def main() -> None:
         settings.update(overrides)
     from ..search.config import validate_search_config
     validate_search_config(settings)
+    if args.vlm_backend == "vllm" and (settings.get("verification_mode") == "question_region" or settings.get("reasoned_json")):
+        parser.error("vLLM does not yet implement question-region spatial verification or reason-first responses")
+    legacy_manifests = sorted(args.data_dir.glob("hrvs_bbox_samples_*.json"))
+    manifest = legacy_manifests[-1] if legacy_manifests else args.data_dir / "annotations.json"
+    vlm = {"backend": args.vlm_backend,
+           "model": args.vlm_model if args.vlm_backend == "vllm" else settings["qwen_model"],
+           "revision": VLLM_MODELS[args.vlm_model]["revision"] if args.vlm_backend == "vllm" else settings.get("qwen_revision"),
+           "quantization": "server" if args.vlm_backend == "vllm" else settings.get("qwen_quantization", "none")}
+    if args.vlm_backend == "vllm":
+        vlm["endpoint"] = args.vlm_endpoint
+    provenance = {
+        "dataset_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        "source_sha256": {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in Path("algorithm").rglob("*.py")},
+        "vlm": vlm,
+        "artifacts": "lean" if args.lean_artifacts else "full",
+    }
+    provenance_path = args.output_dir / "provenance.json"
+    if provenance_path.exists() and json.loads(provenance_path.read_text()) != provenance:
+        raise ValueError("Dataset or implementation changed; use a fresh output directory")
+    provenance_path.write_text(json.dumps(provenance, indent=2))
+    (args.output_dir / "selection.json").write_text(json.dumps(questions, indent=2))
     settings_path = args.output_dir / "config.json"
     serialized = json.loads(json.dumps(settings))
     if settings_path.exists() and json.loads(settings_path.read_text()) != serialized:
@@ -218,12 +264,16 @@ def main() -> None:
     dino = dino_processor = None
     if settings.get("partition_mode", "semantic") != "spatial" and not settings.get("feature_cache_root"):
         dino, dino_processor = load_dinov3(device=vision_device)
-    qwen = load_qwen_scorer(settings["device"], model_id=settings["qwen_model"],
-        revision=settings.get("qwen_revision"), cache_dir=settings.get("qwen_cache_dir"),
-        quantization=settings.get("qwen_quantization", "none"))
-    if staging:
-        qwen = staged_scorer(qwen, compute_device)
-    settings["scoring_backend"] = f"{qwen.model_id}@{qwen.model_revision}:{qwen.quantization}"
+    if args.vlm_backend == "vllm":
+        qwen = VllmScorer(args.vlm_model, args.vlm_endpoint)
+        qwen.quantization = "server"
+    else:
+        qwen = load_qwen_scorer(settings["device"], model_id=settings["qwen_model"],
+            revision=settings.get("qwen_revision"), cache_dir=settings.get("qwen_cache_dir"),
+            quantization=settings.get("qwen_quantization", "none"))
+        if staging:
+            qwen = staged_scorer(qwen, compute_device)
+    settings["scoring_backend"] = f"{qwen.model_id}@{qwen.model_revision}:{qwen.quantization}:pyes"
     llmdet = None
     if settings.get("primary_detector", "sam3") == "llmdet":
         from ..models.llmdet import LLMDetDetector
@@ -280,6 +330,10 @@ def main() -> None:
             )
 
     setattr(score, "score_candidates", score_candidates)
+    if args.vlm_backend == "vllm":
+        score = qwen
+    else:
+        score.backend = "transformers"
 
     def detect(pixels: NDArray, concept: str) -> list[SAM3Detection]:
         with gpu_lock:
@@ -304,6 +358,8 @@ def main() -> None:
                 if report["query"] == query:
                     compact_gallery(folder)
                     return previous
+        if args.lean_artifacts and shutil.disk_usage(args.output_dir).free < 16 * 1024**3:
+            raise RuntimeError("Stopping lean run to preserve 16 GiB free disk space")
         folder.mkdir(parents=True, exist_ok=True)
         outcome: Outcome = {
             "question_id": question["question_id"],
@@ -334,7 +390,7 @@ def main() -> None:
                 local_scorer=score,
                 detector=detect,
                 feature_extractor=feature_provider,
-                artifact_dir=None if args.no_stages else folder / "stages",
+                artifact_dir=None if args.no_stages or args.lean_artifacts else folder / "stages",
                 progress=lambda message: print(
                     f"{question['question_id']}: {message}", flush=True
                 ),
@@ -349,7 +405,7 @@ def main() -> None:
             outcome["local_score_calls"] = result["usage"].get("local_score_calls", 0)
             outcome["final_answer"] = result.get("final_answer", result.get("abstention", {})).get("answer", "")
             outcome["warnings"] = result.get("warnings", [])
-            save_search_result(result, image, folder / "run")
+            save_search_result(result, image, folder / "run", lean=args.lean_artifacts)
             from ..reporting.reference_views import save_reference_views
             save_reference_views(result, image, folder / "references")
             inspection = make_inspection(
@@ -375,6 +431,11 @@ def main() -> None:
         temporary.write_text(json.dumps(outcome, indent=2))
         temporary.replace(checkpoint)
         return outcome
+
+    def tree_link(o: Outcome) -> str:
+        if args.lean_artifacts:
+            return ""
+        return f' | <a href="{html.escape(o["question_id"])}/stages/tree/index.html">Tree and stages</a>'
 
     outcomes: list[Outcome] = []
     def completed_outcomes():
