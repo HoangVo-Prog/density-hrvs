@@ -8,7 +8,7 @@ from ..core.contracts import SearchConfig
 def default_search_config() -> SearchConfig:
     """Return independent, editable defaults; 0 HTTP calls/proposals means unlimited."""
     return {
-        "strategy": "agent-uct",
+        "strategy": "uct",
         "device": "auto",
         "max_api_calls": 32,
         "max_iterations": 100,
@@ -17,7 +17,7 @@ def default_search_config() -> SearchConfig:
         "min_region_pixels": 256,
         "max_proposals_per_node": 16,
         "exploration_weight": 1.4,
-        "cost_weight": 0.2,
+        "cost_weight": 0.0,
         "reference_cost_seconds": 10.0,
         "sam3_threshold": 0.1,
         "mask_threshold": 0.5,

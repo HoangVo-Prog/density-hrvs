@@ -9,14 +9,11 @@ import torch
 from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 
 from ..core.contracts import CandidatePrompt, RegionAssessment, VerifierScore
-from ..core.errors import InvalidScoreResponse
 from .scoring import (
     CONTEXT_INSTRUCTIONS,
     SCORING_PROMPT,
     ScoringView,
     _ignore_request,
-    parse_region_assessment,
-    parse_verifier_score,
 )
 
 QWEN_MODEL = "Qwen/Qwen3-VL-2B-Instruct"
@@ -221,7 +218,41 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
         prompt = TARGET_RESOLVER_PROMPT.format(query=json.dumps(query))
         return clean_sam_prompt(_generate_text(prompt, 32))
 
+    token_ids = [processor.tokenizer.encode(text, add_special_tokens=False) for text in ("Yes", "No")]
+    assert all(len(ids) == 1 for ids in token_ids), token_ids
+    token_ids = [ids[0] for ids in token_ids]
+
     @torch.inference_mode()
+    def probability(image, instruction, query, target):
+        prompt = instruction.replace(
+            "First identify the boxed object and name it explicitly in reason.",
+            "Assess only the cyan-boxed object.",
+        ) + (
+            f"\nSearch description: {json.dumps(query)}\n"
+            f"Does {target} match the complete search description? "
+            "Answer Yes only when all required attributes and relations are visibly supported. "
+            "Otherwise answer No, including when evidence is insufficient. "
+            "Return only Yes or No, without JSON, a numeric rating, or an explanation.\nAnswer:"
+        )
+        messages = [{"role": "user", "content": [
+            {"type": "image", "image": image.convert("RGB")},
+            {"type": "text", "text": prompt},
+        ]}]
+        inputs = processor.apply_chat_template(
+            messages, tokenize=True, add_generation_prompt=True,
+            return_dict=True, return_tensors="pt",
+        ).to(selected)
+        logits = model(**inputs, logits_to_keep=1, use_cache=False).logits[0, -1].float()
+        binary = logits[token_ids].softmax(0)
+        mass = (logits[token_ids].logsumexp(0) - logits.logsumexp(0)).exp().item()
+        p_yes = binary[0].item()
+        score.probability_forwards += 1
+        return {"score": p_yes, "p_yes": p_yes, "yes_no_mass": mass,
+                "answer": "Yes" if p_yes >= 0.5 else "No",
+                "reason": "Yes/No-normalized next-token probability; no self-rating generated.",
+                "model_id": QWEN_MODEL, "model_revision": QWEN_REVISION,
+                "prompt": prompt, "input_size": image.size}
+
     def score(
         image: Image.Image,
         query: str,
@@ -229,33 +260,12 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
         view_type: ScoringView = "region",
         on_request: Callable[[], None] = _ignore_request,
     ) -> VerifierScore:
-        prompt = (
-            (CONTEXT_INSTRUCTIONS if view_type == "context_detail" else "")
-            + SCORING_PROMPT
-            + json.dumps(query)
-        )
-        replies: list[str] = []
+        instruction = (CONTEXT_INSTRUCTIONS if view_type == "context_detail" else "")
+        instruction += SCORING_PROMPT.split("Return ONLY one JSON object", 1)[0]
+        target = "the cyan-boxed target" if view_type == "context_detail" else "this image"
         on_request()
-        for attempt in range(2):
-            text = _generate_image_text(image, prompt, 256)
-            replies.append(text)
-            try:
-                rating = parse_verifier_score(text)
-                return {
-                    **rating,
-                    "model_id": QWEN_MODEL,
-                    "raw_response": text,
-                    "prompt": prompt,
-                    "input_size": image.size,
-                    "model_revision": QWEN_REVISION,
-                }
-            except ValueError:
-                if attempt:
-                    raise InvalidScoreResponse(replies) from None
-                prompt += '\nReturn only valid JSON, for example {"answer":"Uncertain","score":30,"reason":"Required detail is unclear."}.'
-        raise RuntimeError("Local Qwen scoring failed")
+        return probability(image, instruction, query, target)
 
-    @torch.inference_mode()
     def score_candidates(
         image: Image.Image,
         query: str,
@@ -263,40 +273,17 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
         *,
         on_request: Callable[[], None] = _ignore_request,
     ) -> RegionAssessment:
-        """Assess and rank the numbered SAM3 boxes on the whole cluster image."""
-        prompt = REGION_CANDIDATES_PROMPT.format(
-            candidates=json.dumps(candidates, indent=2),
-            query=json.dumps(query),
-        )
-        expected = [candidate["index"] for candidate in candidates]
-        replies: list[str] = []
+        instruction = REGION_CANDIDATES_PROMPT.split("Rank the candidates explicitly.", 1)[0]
+        instruction += "\nCandidates:\n" + json.dumps(candidates, indent=2)
         on_request()
-        for attempt in range(2):
-            text = _generate_image_text(image, prompt, 512)
-            replies.append(text)
-            try:
-                assessment = parse_region_assessment(text, expected)
-                return {
-                    "ranking": assessment["ranking"],
-                    "best_index": assessment["best_index"],
-                    "ambiguous": assessment["ambiguous"],
-                    "ratings": {
-                        index: {
-                            **rating,
-                            "model_id": QWEN_MODEL,
-                            "raw_response": text,
-                            "prompt": prompt,
-                            "input_size": image.size,
-                            "model_revision": QWEN_REVISION,
-                        }
-                        for index, rating in assessment["ratings"].items()
-                    },
-                }
-            except ValueError:
-                if attempt:
-                    raise InvalidScoreResponse(replies) from None
-                prompt += "\nReturn only valid JSON with a full ranking and every candidate index exactly once."
-        raise RuntimeError("Local Qwen candidate scoring failed")
+        ratings = {c["index"]: probability(image, instruction, query, f"numbered candidate {c['index']}")
+                   for c in candidates}
+        ranking = sorted(ratings, key=lambda index: ratings[index]["score"], reverse=True)
+        best = ranking[0]
+        ambiguous = ratings[best]["score"] < 0.5 or (
+            len(ranking) > 1 and ratings[best]["score"] - ratings[ranking[1]]["score"] < 0.05
+        )
+        return {"ratings": ratings, "ranking": ranking, "best_index": best, "ambiguous": ambiguous}
 
     @torch.inference_mode()
     def answer(
@@ -310,6 +297,7 @@ def load_qwen_scorer(device: str = "auto") -> LocalScorer:
         on_request()
         return _generate_image_text(image, prompt, 96)
 
+    score.probability_forwards = 0
     setattr(score, "rewrite", rewrite)
     setattr(score, "resolve", resolve)
     setattr(score, "score_candidates", score_candidates)

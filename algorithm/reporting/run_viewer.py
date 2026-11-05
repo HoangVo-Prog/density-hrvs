@@ -4,7 +4,12 @@ from datetime import datetime, timezone
 import html
 import json
 from pathlib import Path
-from typing import Literal, NotRequired, TypedDict, cast
+from typing import Literal, TypedDict, cast
+
+try:
+    from typing import NotRequired
+except ImportError:
+    from typing_extensions import NotRequired
 
 from ..core.contracts import SearchConfig, SearchReport
 from ..core.events import RunEvent

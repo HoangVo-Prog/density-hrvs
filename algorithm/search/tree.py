@@ -146,7 +146,7 @@ def _selection_reason(
     reason = (
         "Visit an unvisited child first"
         if unvisited
-        else "Maximize Q + exploration bonus - time penalty"
+        else "Maximize the branch selection index"
     )
     ties = sum(
         abs(candidate["selection_index"] - chosen["selection_index"]) < 1e-12

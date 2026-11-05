@@ -216,9 +216,7 @@ def _candidate_proposals(
             )
         )
         qwen_value = (
-            rating["score"]
-            if rating["answer"] != "No" and rating["model_id"] != "not-run"
-            else None
+            rating["score"] if rating["model_id"] != "not-run" else None
         )
         fused = candidate_score(qwen_value, detection["sam3_score"], state.settings)
         verified = bool(
