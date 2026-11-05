@@ -264,6 +264,18 @@ def make_inspection(
         raise ValueError(f"No target annotation found for {question_id}.")
     sample = matches[0]
     target = sample["target_bbox"]
+    if target is None:
+        # This is post-inference metadata absence, not an inference failure.
+        predicted=(report.get("final_answer") or {}).get("answer",(report.get("abstention") or {}).get("answer","Not generated"))
+        summary={"image_id":image_id,"question_id":question_id,"question":sample["question"],
+            "annotated_answer":sample.get("answer"),"predicted_answer":predicted,"target_bbox":None,
+            "iou_available":False,"best_target_iou":0.0,"best_candidate_id":0,"candidates":[],
+            "note":"No ground-truth target box. IoU unavailable; 0 values are compatibility placeholders, not measured overlap.",
+            "stop_reason":report["stop_reason"],"elapsed_seconds":report["elapsed_seconds"],
+            "api_calls":report["usage"]["api_calls"],"reported_cost_usd":report["usage"]["reported_cost_usd"]}
+        (output/"inspection.json").write_text(json.dumps(summary,indent=2)+"\n")
+        (output/"index.html").write_text('<!doctype html><meta charset="utf-8"><h1>'+html.escape(question_id)+'</h1><p>'+html.escape(sample["question"])+'</p><p>Qwen generated answer: '+html.escape(predicted)+'</p><p>No ground-truth target box is available. The inference result is saved; bounding-box IoU cannot be evaluated.</p><p><a href="../run/results.json">Exact saved inference result</a></p>')
+        return summary
     truth = (
         float(target["x"]),
         float(target["y"]),

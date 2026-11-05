@@ -359,6 +359,7 @@ def main() -> None:
                 image_id=question["image_id"],
                 question_id=question["question_id"],
             )
+            outcome["target_bbox_available"] = inspection.get("iou_available", True)
             outcome["top1_iou"] = (
                 inspection["candidates"][0]["target_iou"]
                 if inspection["candidates"]
