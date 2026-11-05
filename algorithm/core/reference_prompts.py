@@ -1,5 +1,6 @@
 """Question-only reference extraction, preserving known attributes and roles."""
 import json
+import re
 from ..models.scoring import _json_payload
 
 REFERENCE_PROMPT = """Extract the physical REFERENCE objects that identify the requested target.
@@ -66,9 +67,31 @@ context). Role is target or reference. Always include at least one target.
 Example question: What color is the cargo bed of the pickup diagonally above and
 to the left of the turquoise car on the bottom approach?
 Output: {"target":"cargo bed of pickup","objects":[{"role":"target","prompt":"pickup cargo bed","context":"diagonally above-left of turquoise car"},{"role":"reference","prompt":"pickup","context":"owns requested cargo bed"},{"role":"reference","prompt":"turquoise car","context":"bottom approach"}]}
-Example question: What shape is the white structure in the green area at the bottom-left of the intersection?
-Output: {"target":"white structure","objects":[{"role":"target","prompt":"white structure","context":"inside bottom-left green area"},{"role":"reference","prompt":"green area","context":"bottom-left of intersection"}]}
+Only physical objects/parts belong in objects. Directions, approaches, queues,
+image sides and positions are LOCATION CONTEXT, never detector prompts.
+Examples of context-only phrases: right-hand approach, bottom approach,
+uppermost queue, lowest full queue, right side of the intersection.
+Keep these phrases in context attached to the relevant physical object.
+Example question: What color is the open cargo bed of the white-cab pickup
+diagonally above and to the right of the blue bus on the right-hand approach?
+Output: {"target":"open cargo bed of white-cab pickup","objects":[{"role":"target","prompt":"open cargo bed of white-cab pickup","context":"diagonally above-right of blue bus on right-hand approach"},{"role":"reference","prompt":"white-cab pickup","context":"owns requested cargo bed"},{"role":"reference","prompt":"blue bus","context":"right-hand approach"}]}
 Question: """
+
+
+# Narrow guard for known scene-position failures, not a physical-object ontology.
+_SCENE_POSITION = re.compile(
+    r"^(?:the )?(?:(?:right(?:-hand)?|left(?:-hand)?|upper|lower|top|bottom|"
+    r"uppermost|lowermost|topmost|bottommost|leftmost|rightmost|lowest|highest|"
+    r"full|middle|central|front|rear|traffic) )*"
+    r"(?:approach|queue|side|corner|foreground|background)"
+    r"(?: (?:of|in|on) (?:the )?(?:intersection|image|scene|picture|road))?$",
+    re.IGNORECASE,
+)
+
+
+def is_scene_position_prompt(prompt):
+    """Recognize location phrases that must not become SAM3 object queries."""
+    return bool(_SCENE_POSITION.fullmatch(" ".join(prompt.split()).strip(" .")))
 
 
 def parse_object_plan(text):
@@ -80,7 +103,7 @@ def parse_object_plan(text):
         raise ValueError('Missing physical target description')
     if not 1 <= len(payload['objects']) <= 16:
         raise ValueError('Expected 1 through 16 object prompts')
-    objects=[];seen=set();counts={'target':0,'reference':0}
+    objects=[];seen=set();context_only=[];counts={'target':0,'reference':0}
     for obj in payload['objects']:
         if not isinstance(obj, dict) or obj.get('role') not in counts:
             raise ValueError('Every object needs target or reference role')
@@ -91,7 +114,14 @@ def parse_object_plan(text):
             raise ValueError('Invalid object context')
         prompt=' '.join(prompt.split()).strip(' .');key=(role,prompt.casefold(),context.casefold())
         if key in seen:continue
+        if is_scene_position_prompt(prompt):
+            if role == 'target':
+                raise ValueError('Requested target must be a physical object, not a scene position')
+            context_only.append({'prompt':prompt,'context':context.strip(),
+                'reason':'scene position, not a physical reference object'})
+            seen.add(key)
+            continue
         counts[role]+=1;objects.append({'id':f'{role}_{counts[role]}','role':role,'prompt':prompt,'context':context.strip()});seen.add(key)
     if not counts['target']:
         raise ValueError('SAM3 prompt plan omitted the requested object')
-    return {'target':target.strip(),'objects':objects,'references':[o for o in objects if o['role']=='reference']}
+    return {'target':target.strip(),'objects':objects,'references':[o for o in objects if o['role']=='reference'], 'context_only':context_only}

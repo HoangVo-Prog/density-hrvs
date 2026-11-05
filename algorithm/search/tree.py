@@ -612,7 +612,10 @@ def explore_tree(
         on_step=on_step,
         on_event=on_event,
     )
-    run.expand(run.nodes[0])
+    # Question-region mode must detect and verify the full scene BEFORE splitting.
+    # Other modes retain their existing child-first initialization.
+    if config.get("verification_mode") != "question_region":
+        run.expand(run.nodes[0])
     run.snapshot()
     # If the image cannot be partitioned, evaluate its root once rather than fail.
     if not run.nodes[0]["children"]:
