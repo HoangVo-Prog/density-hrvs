@@ -62,9 +62,10 @@ def answer_top_region(state: RunState, result: SearchResult) -> FinalAnswer | No
         "bbox": best["bbox"],
         "crop_bbox": crop_bbox,
         "proposal_score": best["score"],
-        "model_id": QWEN_MODEL,
+        "model_id": getattr(state.local_scorer, "model_id", QWEN_MODEL),
+        "backend": getattr(state.local_scorer, "backend", "transformers"),
         "raw_response": raw,
         "prompt": prompt,
         "input_size": crop.size,
-        "model_revision": QWEN_REVISION,
+        "model_revision": getattr(state.local_scorer, "model_revision", QWEN_REVISION),
     }

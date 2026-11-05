@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal, TypedDict
+
+try:
+    from typing import NotRequired
+except ImportError:
+    from typing_extensions import NotRequired
 
 import numpy as np
 from numpy.typing import NDArray
@@ -423,7 +428,7 @@ class NodeReport(TypedDict):
     mean_quality: float
     evaluated: bool
     exhausted: bool
-    mask_key: str
+    mask_key: NotRequired[str]  # Absent in lean artifacts.
     evaluation_error: NotRequired[str]
 
 
@@ -434,7 +439,7 @@ class ClusterReport(TypedDict):
     bbox: BoundingBox
     score: float
     verifier: VerifierScore
-    image_path: str
+    image_path: NotRequired[str]  # Absent in lean artifacts.
     score_components: NotRequired[RegionScoreComponents]
     scoring_input_image_path: NotRequired[
         str
@@ -451,7 +456,8 @@ class ProposalReport(ClusterReport):
     local_bbox: BoundingBox
     sam3_score: float | None
     cluster_score: float
-    mask_key: str
+    mask_key: NotRequired[str]  # Absent in lean artifacts.
+    region_sheet: NotRequired[dict]  # Lean: numbered sheet rebuilt from the verifier prompt.
     evidence_image_path: NotRequired[str]  # Lossless PNG of the actual uploaded view.
     evidence_info: NotRequired[EvidenceInfo]
     scoring_scope: NotRequired[Literal["region", "proposal"]]
@@ -476,3 +482,4 @@ class SearchReport(TypedDict):
     proposals: list[ProposalReport]
     final_answer: NotRequired[FinalAnswer]  # Question + top-1 region answer.
     warnings: NotRequired[list[str]]
+    artifacts: NotRequired[str]  # "lean" when masks and most images were not saved.

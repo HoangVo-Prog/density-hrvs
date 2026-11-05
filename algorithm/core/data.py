@@ -21,8 +21,6 @@ def load_dataset_image(data_dir: str | Path, image_id: str) -> Image.Image:
     if not root.is_dir():
         raise FileNotFoundError(f"Dataset directory does not exist: {root}")
     stem = Path(image_id).stem
-    if stem.isdigit():
-        stem = stem.zfill(4)
     extensions = {".jpg", ".jpeg", ".png", ".webp"}
     files = [
         path
