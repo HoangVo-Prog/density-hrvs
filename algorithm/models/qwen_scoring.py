@@ -259,7 +259,7 @@ def load_qwen_scorer(device: str = "auto", *, model_id: str = QWEN_MODEL,
         messages=[{"role":"user","content":[
             {"type":"text","text":"IMAGE 1: FULL-SCENE OVERVIEW"},
             {"type":"image","image":overview.convert("RGB")},
-            {"type":"text","text":"IMAGE 2: CLEAN ENLARGED REGION"},
+            {"type":"text","text":"IMAGE 2: DETAIL REGION"},
             {"type":"image","image":region.convert("RGB")},
             {"type":"text","text":prompt}]}]
         inputs=processor.apply_chat_template(messages,tokenize=True,add_generation_prompt=True,
@@ -297,19 +297,15 @@ def load_qwen_scorer(device: str = "auto", *, model_id: str = QWEN_MODEL,
             content = [
                 {"type": "text", "text": "IMAGE 1: FULL-SCENE OVERVIEW"},
                 {"type": "image", "image": spatial_context["overview"].convert("RGB")},
-                {"type": "text", "text": "IMAGE 2: CLEAN ENLARGED REGION"},
+                {"type": "text", "text": "IMAGE 2: DETAIL REGION"},
                 {"type": "image", "image": image.convert("RGB")},
                 {"type": "text", "text": prompt},
             ]
         else:
-            prompt = ("Evaluate this CLEAN REGION against the ORIGINAL QUESTION. "
-                "Is there enough visible evidence to identify the requested target, "
-                "confirm its stated attributes, references and spatial relationships, "
-                "and answer the question? Judge the requested target, not merely a "
-                "reference. SAM3 detections are not required. Do not infer missing "
-                "context or treat crop edges as original-scene directions. "
-                "Answer Yes or No only. Do not give a score, JSON or explanation.\n"
-                "Original question: " + json.dumps(question))
+            prompt = ("Can you answer the question from this region? Judge the requested "
+                "target and its references. Interpret directions from the displayed image, "
+                "not the object's own facing direction. Answer Yes or No only.\nQuestion: "
+                + json.dumps(question))
             content = [{"type": "image", "image": image.convert("RGB")},
                        {"type": "text", "text": prompt}]
         token_ids = yes_no_token_ids(processor.tokenizer)
@@ -329,7 +325,7 @@ def load_qwen_scorer(device: str = "auto", *, model_id: str = QWEN_MODEL,
         if spatial_context is not None:
             result.update(overview_input_size=spatial_context["overview"].size,
                 spatial_metadata=metadata,
-                verification_input="original_question_overview_clean_region_coordinates")
+                verification_input="original_question_overview_sam3_boxes_region_coordinates")
         return result
 
     @torch.inference_mode()

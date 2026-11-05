@@ -17,10 +17,11 @@ def evaluate_question_region(state,node,pixels,folder):
     spatial_context=None
     key_description=state.question
     if state.settings.get("region_spatial_context",False):
-        from ..models.spatial_context import build_region_context
+        from ..models.sam3_visual_prompt import build_sam3_region_context
         import hashlib
-        spatial_context=build_region_context(state.source_image,node["bbox"],node["mask"],
+        spatial_context=build_sam3_region_context(state.source_image,node["bbox"],node["mask"],detections=detections,
             node_id=node["node_id"],max_side=state.settings.get("spatial_overview_max_side",768))
+        image=spatial_context["detail"]
         key_description+=json.dumps(spatial_context["metadata"],sort_keys=True)
         key_description+=hashlib.sha256(spatial_context["overview"].tobytes()).hexdigest()
     key=state.view_key(image,"region",key_description)
@@ -51,11 +52,12 @@ def evaluate_question_region(state,node,pixels,folder):
         "image":pixels.copy(),"score":quality,"sam3_score":None,"cluster_id":node["node_id"],
         "cluster_score":quality,"verifier":rating,"candidate_rank":1,"candidate_verified":verified,
         "scoring_scope":"region","score_components":components,"proposal_backend":"qwen:question_region",
-        "proposal_role":"answer_region","scoring_method":"qwen3vl_original_question_clean_region"}
+        "proposal_role":"answer_region","scoring_method":"qwen3vl_original_question_sam3_box_region"}
     from .pipeline import _record_cluster,register_proposals
     _record_cluster(state,node,pixels,quality,rating,components)
     if spatial_context is not None:
         state.observed_clusters[-1]["verification_overview"]=np.asarray(spatial_context["overview"])
+    state.observed_clusters[-1]["image"]=np.asarray(image)
     register_proposals(state,[proposal])
     save_node_detections(pixels,detections,distinct,components,folder)
     if folder is not None:
@@ -64,6 +66,6 @@ def evaluate_question_region(state,node,pixels,folder):
             spatial_context["overview"].save(folder/"question_region_overview.png")
             (folder/"question_region_mapping.json").write_text(json.dumps(spatial_context["metadata"],indent=2))
         (folder/"question_region_score.json").write_text(json.dumps({"question":state.question,"rating":rating},indent=2))
-    state.on_event("question_region_verified","Qwen evaluated original question on the clean region.",
+    state.on_event("question_region_verified","Qwen evaluated original question with SAM3 boxes and image-view directions.",
         {"node_id":node["node_id"],"question":state.question,"qwen":rating,"detector_boxes":len(detections)})
     return {"assessment":rating,"proposals":[proposal],"raw_reward":quality,"candidate_checks":[]}

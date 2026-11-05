@@ -43,37 +43,30 @@ def build_region_context(source,bbox,mask=None,*,node_id=None,max_side=768):
     return {'overview':overview,'metadata':metadata}
 
 
-SPATIAL_INSTRUCTIONS="""You receive TWO images of the SAME original scene.
-IMAGE 1 is a small FULL-SCENE OVERVIEW. The cyan rectangle locates the current
-region in the original image. A yellow contour, if present, is the active merged
-cluster mask. These are navigation annotations, not an object/target box and not
-object colors. IMAGE 2 is the CLEAN ENLARGED REGION inside that rectangle.
-Use IMAGE 1 to establish global position and reference-object relationships.
-Use IMAGE 2 to inspect the requested target and its appearance. A target can be
-upper-right inside IMAGE 2 while still bottom-left of the intersection in IMAGE 1.
-Directions in the question refer to the ORIGINAL scene/reference object, not to
-the edges of IMAGE 2. Image coordinates alone do not establish position relative
-to an intersection: inspect the overview. Coordinate metadata is geometry only.
-The requested target MUST be visible in IMAGE 2. Seeing the target elsewhere in
-IMAGE 1 is NOT enough to accept this region or answer from an unrelated region.
-Do not infer hidden details or use annotation colors as object attributes.
+SPATIAL_INSTRUCTIONS = """Image 1 shows the full scene; its cyan frame locates Image 2, the detail region.
+SAM3 candidate boxes have matching IDs in both images: T=target, R=reference.
+Boxes are suggestions, not confirmed matches. Ignore annotation colors.
+Interpret left/right/above/below from the displayed image, NEVER from an object's
+own facing direction. Use the full scene for position and the detail for appearance.
+The requested target MUST be visible in IMAGE 2.
 """
 
 
-def spatial_verification_prompt(question,metadata):
-    return SPATIAL_INSTRUCTIONS+"""Evaluate whether the original question is answerable using this region's target
-detail together with the full-scene spatial context. Judge the target named in
-the original question, not merely a reference. SAM3 detections are not required.
-Answer Yes or No only. Yes requires a visible target, confirmed required
-identity/relations, and enough detail to answer the original question. Answer No
-if the target is absent, a required relation is contradicted, or evidence is
-insufficient. Do not generate JSON, a numeric score, or an explanation.
-Region mapping: """+json.dumps(metadata)+"\nOriginal question: "+json.dumps(question)
+def _short_context(metadata):
+    geometry = {k: metadata[k] for k in ("original_image_size", "region_bbox_xyxy")}
+    legend = metadata.get("sam3_box_legend", [])
+    if legend:
+        geometry["box_labels"] = legend
+    return json.dumps(geometry, separators=(",", ":"))
 
 
-def spatial_answer_prompt(question,metadata):
-    return SPATIAL_INSTRUCTIONS+"""Answer the ORIGINAL QUESTION about the requested target in IMAGE 2.
-Use the overview to interpret location and relationships; use the clean region
-for appearance. If IMAGE 2 lacks the requested target or sufficient evidence,
-reply exactly Uncertain. Otherwise give one concise answer, without explanation.
-Region mapping: """+json.dumps(metadata)+"\nOriginal question: "+json.dumps(question)
+def spatial_verification_prompt(question, metadata):
+    return (SPATIAL_INSTRUCTIONS + "Can you answer the question from these images? "
+            "Answer Yes or No only.\nContext: " + _short_context(metadata)
+            + "\nQuestion: " + json.dumps(question))
+
+
+def spatial_answer_prompt(question, metadata):
+    return (SPATIAL_INSTRUCTIONS + "Answer the question briefly. If the evidence is "
+            "insufficient, answer Uncertain.\nContext: " + _short_context(metadata)
+            + "\nQuestion: " + json.dumps(question))

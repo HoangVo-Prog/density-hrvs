@@ -65,13 +65,15 @@ def answer_top_region(state: RunState, result: SearchResult) -> FinalAnswer | No
     evidence = None
     spatial_context=None
     if view_type == "spatial_context":
-        from ..models.spatial_context import build_region_context,spatial_answer_prompt
+        from ..models.spatial_context import spatial_answer_prompt
+        from ..models.sam3_visual_prompt import build_sam3_region_context
         answerer=getattr(state.local_scorer,"answer_spatial",None)
         if not callable(answerer):raise ValueError("spatial_context answer requires answer_spatial")
-        spatial_context=build_region_context(state.source_image,best["bbox"],best.get("mask"),
+        spatial_context=build_sam3_region_context(state.source_image,best["bbox"],best.get("mask"),
+            detections=state.detection_cache.get(best.get("cluster_id"),[]),
             node_id=best.get("cluster_id"),max_side=state.settings.get("spatial_overview_max_side",768))
         crop_bbox=best["bbox"]
-        crop=state.source_image.crop(crop_bbox)
+        crop=spatial_context["detail"]
         template=ANSWER_PROMPT
     elif view_type == "marked_detail":
         evidence_answerer = getattr(state.local_scorer, "answer_evidence", None)
