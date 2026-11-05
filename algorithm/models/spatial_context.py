@@ -66,7 +66,21 @@ def spatial_verification_prompt(question, metadata):
             + "\nQuestion: " + json.dumps(question))
 
 
+def spatial_verification_reason_prompt(question, metadata, decision):
+    return (SPATIAL_INSTRUCTIONS + "The probability-based verifier decision is "
+        + json.dumps(decision) + ". Explain that decision using visible evidence in at most "
+        "12 words. Do not invent evidence; state unclear evidence honestly. Return ONLY JSON "
+        "with reason FIRST, then answer; keep the decision unchanged: "
+        + json.dumps({"reason":"brief visual evidence", "answer":decision})
+        + "\nContext: " + _short_context(metadata) + "\nQuestion: " + json.dumps(question))
+
+
 def spatial_answer_prompt(question, metadata):
-    return (SPATIAL_INSTRUCTIONS + "Answer the question briefly. If the evidence is "
-            "insufficient, answer Uncertain.\nContext: " + _short_context(metadata)
+    instruction = ("Answer the question briefly. If the evidence is "
+                   "insufficient, answer Uncertain.")
+    if metadata.get("reasoned_json", False):
+        instruction += (' Give a visible-evidence reason in at most 12 words. '
+            'Return ONLY JSON with reason FIRST, then answer: '
+            '{"reason":"brief visual evidence","answer":"concise answer"}.')
+    return (SPATIAL_INSTRUCTIONS + instruction + "\nContext: " + _short_context(metadata)
             + "\nQuestion: " + json.dumps(question))

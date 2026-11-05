@@ -73,6 +73,7 @@ def answer_top_region(state: RunState, result: SearchResult) -> FinalAnswer | No
             detections=state.detection_cache.get(best.get("cluster_id"),[]),
             node_id=best.get("cluster_id"),max_side=state.settings.get("spatial_overview_max_side",768))
         crop_bbox=best["bbox"]
+        spatial_context["metadata"]["reasoned_json"]=state.settings.get("reasoned_json",False)
         crop=spatial_context["detail"]
         template=ANSWER_PROMPT
     elif view_type == "marked_detail":
@@ -96,8 +97,17 @@ def answer_top_region(state: RunState, result: SearchResult) -> FinalAnswer | No
     raw = invoke_counted(answerer, crop, state.question, on_request=state.charge_answer,**kwargs)
     if not isinstance(raw, str):
         raise ValueError("answerer returned a non-string")
-    answer = clean_answer(raw)
+    explanation = {}
+    if spatial_context is not None and spatial_context["metadata"].get("reasoned_json",False):
+        from ..models.reason_first import parse_reason_first
+        response = parse_reason_first(raw)
+        answer = clean_answer(response["answer"])
+        explanation = {"reason":response["reason"], "answer":answer,
+                       "response_json":{"reason":response["reason"], "answer":answer}}
+    else:
+        answer = clean_answer(raw)
     return {
+        **explanation,
         "attribute_bbox": best.get("attribute_bbox"),
         "view_type": view_type,
         "selected_candidate_id": f"node_{best.get('cluster_id', 'unknown')}:candidate_{best.get('candidate_rank', 'unknown')}",

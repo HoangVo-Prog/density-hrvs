@@ -21,6 +21,7 @@ def evaluate_question_region(state,node,pixels,folder):
         import hashlib
         spatial_context=build_sam3_region_context(state.source_image,node["bbox"],node["mask"],detections=detections,
             node_id=node["node_id"],max_side=state.settings.get("spatial_overview_max_side",768))
+        spatial_context["metadata"]["reasoned_json"]=state.settings.get("reasoned_json",False)
         image=spatial_context["detail"]
         key_description+=json.dumps(spatial_context["metadata"],sort_keys=True)
         key_description+=hashlib.sha256(spatial_context["overview"].tobytes()).hexdigest()

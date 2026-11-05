@@ -326,6 +326,19 @@ def load_qwen_scorer(device: str = "auto", *, model_id: str = QWEN_MODEL,
             result.update(overview_input_size=spatial_context["overview"].size,
                 spatial_metadata=metadata,
                 verification_input="original_question_overview_sam3_boxes_region_coordinates")
+        if spatial_context is not None and metadata.get("reasoned_json", False):
+            from .reason_first import parse_reason_first
+            from .spatial_context import spatial_verification_reason_prompt
+            explanation_prompt = spatial_verification_reason_prompt(question, metadata, rating["answer"])
+            explanation, raw, used_prompt = generate_rating(
+                lambda current: _generate_spatial_text(spatial_context["overview"], image, current, 160),
+                lambda text: parse_reason_first(text, rating["answer"]),
+                explanation_prompt, on_request,
+                'Return only JSON with reason first and answer second. Keep the supplied Yes/No decision unchanged.')
+            result = {"reason":explanation["reason"], "answer":rating["answer"],
+                **{k:v for k,v in result.items() if k not in {"reason","answer"}},
+                "probability_prompt":prompt, "prompt":used_prompt, "raw_response":raw,
+                "response_json":explanation, "explanation_is_posthoc":True}
         return result
 
     @torch.inference_mode()
@@ -442,6 +455,13 @@ Question: """ + json.dumps(question)
     def answer_spatial(image,question,*,spatial_context,on_request: Callable = _ignore_request):
         from .spatial_context import spatial_answer_prompt
         prompt=spatial_answer_prompt(question,spatial_context["metadata"])
+        if spatial_context["metadata"].get("reasoned_json", False):
+            from .reason_first import parse_reason_first
+            parsed, raw, used_prompt = generate_rating(
+                lambda current: _generate_spatial_text(spatial_context["overview"], image, current, 160),
+                parse_reason_first, prompt, on_request,
+                'Return only JSON with reason first and answer second.')
+            return json.dumps(parsed)
         on_request()
         return _generate_spatial_text(spatial_context["overview"],image,prompt,96)
 
