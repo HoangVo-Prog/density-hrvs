@@ -36,7 +36,10 @@ def evaluate_question_region(state,node,pixels,folder):
             rating=invoke_counted(verifier,image,state.question,on_request=state.charge_local,**kwargs)
         finally:state.record_cost("score",time.perf_counter()-tick)
         state.score_cache[key]=rating
-    quality=rating["score"] if rating["answer"]!="No" else 0.
+    # Probability is continuous evidence even when No is the argmax token.
+    # Legacy injected scorers retain their historical No=0 behavior.
+    quality=(rating["score"] if rating.get("score_source")=="yes_no_token_probability"
+             else rating["score"] if rating["answer"]!="No" else 0.)
     verified=rating["answer"]=="Yes" and rating["score"]>=state.settings.get("candidate_accept_score",.5)
     state.usage["question_region_checks"]=state.usage.get("question_region_checks",0)+1
     components={"qwen_score":rating["score"],"raw_box_count":len(detections),"unique_box_count":len(distinct),

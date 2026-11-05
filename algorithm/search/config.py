@@ -33,6 +33,7 @@ def default_search_config() -> SearchConfig:
         "rewrite_sam_prompt": True,
         "sam3_first": True,
         "verification_mode": "candidate",
+        "question_region_score_source": "yes_no_token_probability",
         "discovery_mode": "off",
         "discovery_tiles": 3,
         "discovery_candidates": 5,

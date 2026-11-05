@@ -288,34 +288,49 @@ def load_qwen_scorer(device: str = "auto", *, model_id: str = QWEN_MODEL,
 
     @torch.inference_mode()
     def score_question_region(image: Image.Image, question: str, *, on_request: Callable = _ignore_request, spatial_context=None) -> dict:
+        from .yes_no_probability import yes_no_token_ids, score_yes_no_logits
+
         if spatial_context is not None:
             from .spatial_context import spatial_verification_prompt
-            metadata=spatial_context["metadata"]
-            prompt=spatial_verification_prompt(question,metadata)
-            rating,raw,final_prompt=generate_rating(
-                lambda current:_generate_spatial_text(spatial_context["overview"],image,current,384),
-                parse_verifier_score,prompt,on_request,'Return only JSON with answer Yes/No/Uncertain, score 0-100, reason.')
-            return {**rating,'model_id':model_id,'model_revision':revision,'raw_response':raw,
-                'prompt':final_prompt,'input_size':image.size,'overview_input_size':spatial_context["overview"].size,
-                'spatial_metadata':metadata,'verification_input':'original_question_overview_clean_region_coordinates'}
-        prompt = """Evaluate this CLEAN REGION against the ORIGINAL QUESTION below.
-Is there enough visible evidence IN THIS REGION to identify the requested target
-using its stated attributes, references and spatial relationships, and answer the
-question? Inspect the entire region. There are no candidate boxes to verify.
-Judge the requested target in the question, not merely a reference object.
-Do not require any detector box or mask to cover the target. Do not guess missing
-context. Do not interpret bottom-left relative to this crop when the question
-refers to the whole intersection or scene; if the necessary context is absent,
-use Uncertain. Do not accept a similar object at a different specified location.
-Return ONLY JSON: {"answer":"Yes/No/Uncertain","score":0-100,"reason":"short visual explanation naming target and relevant evidence"}.
-Yes means the complete question is answerable from visible region evidence.
-No means absent target or a clear contradiction. Uncertain means insufficient
-identity, relation, or detail evidence. Score rates support for the full question.
-Original question: """ + json.dumps(question)
-        rating, raw, final_prompt = generate_rating(lambda current: _generate_image_text(image,current,384),
-            parse_verifier_score,prompt,on_request,'Return only JSON with answer Yes, No or Uncertain, score 0-100, and reason.')
-        return {**rating,'model_id':model_id,'model_revision':revision,'raw_response':raw,
-                'prompt':final_prompt,'input_size':image.size,'verification_input':'original_question_and_clean_region'}
+            metadata = spatial_context["metadata"]
+            prompt = spatial_verification_prompt(question, metadata)
+            content = [
+                {"type": "text", "text": "IMAGE 1: FULL-SCENE OVERVIEW"},
+                {"type": "image", "image": spatial_context["overview"].convert("RGB")},
+                {"type": "text", "text": "IMAGE 2: CLEAN ENLARGED REGION"},
+                {"type": "image", "image": image.convert("RGB")},
+                {"type": "text", "text": prompt},
+            ]
+        else:
+            prompt = ("Evaluate this CLEAN REGION against the ORIGINAL QUESTION. "
+                "Is there enough visible evidence to identify the requested target, "
+                "confirm its stated attributes, references and spatial relationships, "
+                "and answer the question? Judge the requested target, not merely a "
+                "reference. SAM3 detections are not required. Do not infer missing "
+                "context or treat crop edges as original-scene directions. "
+                "Answer Yes or No only. Do not give a score, JSON or explanation.\n"
+                "Original question: " + json.dumps(question))
+            content = [{"type": "image", "image": image.convert("RGB")},
+                       {"type": "text", "text": prompt}]
+        token_ids = yes_no_token_ids(processor.tokenizer)
+        inputs = processor.apply_chat_template(
+            [{"role": "user", "content": content}], tokenize=True,
+            add_generation_prompt=True, return_dict=True, return_tensors="pt",
+        ).to(selected)
+        # One charged physical score operation. No generate(), JSON or repairs.
+        on_request()
+        outputs = model(**inputs, logits_to_keep=1, use_cache=False)
+        rating = score_yes_no_logits(outputs.logits[0, -1], token_ids)
+        result = {**rating, "model_id": model_id, "model_revision": revision,
+                  "prompt": prompt, "input_size": image.size,
+                  "raw_response": json.dumps({"source": rating["score_source"],
+                      "answer": rating["answer"], "yes_probability": rating["score"]}),
+                  "verification_input": "original_question_and_clean_region"}
+        if spatial_context is not None:
+            result.update(overview_input_size=spatial_context["overview"].size,
+                spatial_metadata=metadata,
+                verification_input="original_question_overview_clean_region_coordinates")
+        return result
 
     @torch.inference_mode()
     def resolve_references(question: str, *, on_request: Callable = _ignore_request) -> dict:

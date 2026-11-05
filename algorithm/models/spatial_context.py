@@ -64,10 +64,10 @@ def spatial_verification_prompt(question,metadata):
     return SPATIAL_INSTRUCTIONS+"""Evaluate whether the original question is answerable using this region's target
 detail together with the full-scene spatial context. Judge the target named in
 the original question, not merely a reference. SAM3 detections are not required.
-Return ONLY JSON with answer exactly Yes, No or Uncertain; score from 0 to 100;
-and reason briefly identifying target and evidence. Yes requires visible target,
-required identity/relations, and enough detail to answer. No means clear absence
-or contradiction; Uncertain means insufficient evidence.
+Answer Yes or No only. Yes requires a visible target, confirmed required
+identity/relations, and enough detail to answer the original question. Answer No
+if the target is absent, a required relation is contradicted, or evidence is
+insufficient. Do not generate JSON, a numeric score, or an explanation.
 Region mapping: """+json.dumps(metadata)+"\nOriginal question: "+json.dumps(question)
 
 
