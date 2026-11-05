@@ -143,6 +143,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Top SAM3 boxes drawn for whole-region verification; 0 disables",
     )
     parser.add_argument(
+        "--region-fallback-limit",
+        type=int,
+        default=3,
+        help="Ambiguous regions re-check this many candidates with detail sheets",
+    )
+    parser.add_argument(
+        "--discovery-mode",
+        choices=("off", "sam3_qwen"),
+        default="off",
+        help="Seed the tree from tiled SAM3 candidates reranked by Qwen",
+    )
+    parser.add_argument("--discovery-tiles", type=int, default=3)
+    parser.add_argument("--discovery-candidates", type=int, default=5)
+    parser.add_argument("--discovery-seeds", type=int, default=3)
+    parser.add_argument("--discovery-overlap", type=float, default=0.10)
+    parser.add_argument(
         "--legacy-region-qwen",
         action="store_true",
         help="Score the whole region before detection instead of candidate sheets",
@@ -165,6 +181,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--exploration-weight", type=float, default=1.4)
     parser.add_argument("--cost-weight", type=float, default=0.2)
+    parser.add_argument(
+        "--no-final-answer",
+        action="store_true",
+        help="Skip the post-search Qwen answer from the top-ranked region",
+    )
     parser.add_argument(
         "--no-ground-truth",
         action="store_true",
@@ -235,6 +256,12 @@ def main(argv: list[str] | None = None) -> int:
             candidate_check_limit=args.candidate_check_limit,
             verification_mode=args.verification_mode,
             region_candidate_limit=args.region_candidate_limit,
+            region_fallback_limit=args.region_fallback_limit,
+            discovery_mode=args.discovery_mode,
+            discovery_tiles=args.discovery_tiles,
+            discovery_candidates=args.discovery_candidates,
+            discovery_seeds=args.discovery_seeds,
+            discovery_overlap=args.discovery_overlap,
             candidate_query_mode=args.candidate_query_mode,
             sam_prompt=concept,
             rewrite_sam_prompt=(
@@ -244,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
             strategy=args.strategy,
             exploration_weight=args.exploration_weight,
             cost_weight=args.cost_weight,
+            answer_question=not args.no_final_answer,
         )
         validate_search_config(config)
         if args.cpu_threads < 1:
@@ -324,6 +352,10 @@ def main(argv: list[str] | None = None) -> int:
             "iteration_completed",
             "evaluation_failed",
             "search_finished",
+            "answer_started",
+            "answer_completed",
+            "answer_failed",
+            "answer_skipped",
         }:
             render_run_page(output, request, status)
 
@@ -341,6 +373,7 @@ def main(argv: list[str] | None = None) -> int:
         result = run_visual_search(
             np.asarray(image),
             query,
+            question=args.question,
             config=config,
             artifact_dir=output / "stages",
             progress=lambda message: None,

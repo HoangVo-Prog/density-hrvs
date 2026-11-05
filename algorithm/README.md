@@ -60,10 +60,16 @@ from algorithm_refactored.search.config import default_search_config
 - Qwen acts as the SAM3 **target resolver**: it receives the full search
   description and chooses the object/region to localize, rather than being
   constrained to the initial noun parsed from the question.
-- The default `region` verification mode sends the whole cluster crop with the
-  top-5 SAM3 boxes drawn and labelled, plus bbox/confidence metadata, in one
-  Qwen call. `candidate` mode remains available for per-candidate context/detail
-  evidence sheets and A/B comparisons.
+- The default `candidate` verification mode checks each candidate on a zoomed
+  context/detail sheet. The experimental `region` mode sends the whole cluster
+  with numbered top boxes in one Qwen ranking call and falls back on ties.
+- `discovery_mode="sam3_qwen"` optionally runs a tiled SAM3 scan before the tree,
+  reranks the candidates with Qwen, and adds the best regions as root seeds while
+  keeping the normal semantic/spatial children as a fallback.
+- The post-search answer stage crops a padded window around the top-ranked box
+  and asks Qwen the original question, writing `final_answer` (answer, bbox,
+  crop, prompt, raw response) into `results.json`; disable it with
+  `answer_question=False` or `--no-final-answer`.
 - `main.py` is a small compatibility facade; CLIs live under `tools/` and load
   model-heavy modules lazily.
 

@@ -3,20 +3,29 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import html
+import hashlib
 import json
+import shutil
 from pathlib import Path
 import threading
 from collections.abc import Callable
-from typing import NotRequired, TypedDict, cast
+from typing import TypedDict, cast
+
+try:
+    from typing import NotRequired
+except ImportError:
+    from typing_extensions import NotRequired
 
 import numpy as np
+import torch
 from numpy.typing import NDArray
 from PIL import Image
 
 from ..core.contracts import CandidatePrompt, SAM3Detection, VerifierScore
 from ..core.data import load_dataset_image
-from ..reporting.inspection import make_inspection
-from ..models.qwen_scoring import load_qwen_scorer
+from ..search.region_scoring import bbox_iou
+from ..models.qwen_scoring import QWEN_MODEL, QWEN_REVISION, load_qwen_scorer
+from ..models.vllm_scoring import DEFAULT_ENDPOINT, VLLM_MODELS, VllmScorer
 from ..core.query import question_target
 from ..models.scoring import ScoringView, _ignore_request
 from ..models.regions import exec_dinov3_pca_on_image, load_dinov3
@@ -44,6 +53,7 @@ class Outcome(TypedDict):
     local_score_calls: int  # Local Qwen generations, separate from HTTP attempts.
     top1_iou: float  # Highest-ranked proposal overlap, evaluated after inference.
     best_iou: float  # Best overlap anywhere in the candidate list.
+    final_answer: NotRequired[str]  # Qwen text answer from the top-ranked region.
     warnings: NotRequired[
         list[str]
     ]  # Skipped malformed verifier regions, not hidden as zero scores.
@@ -68,6 +78,19 @@ def compact_gallery(folder: Path) -> None:
             image.save(path, quality=85, optimize=True)
         else:
             image.save(path, optimize=True)
+
+
+def inspect_result(result, target, folder):
+    box = (target["x"], target["y"], target["x"] + target["width"], target["y"] + target["height"]) if target else None
+    candidates = [{"bbox": p["bbox"], "score": p["score"],
+                   "target_iou": bbox_iou(tuple(p["bbox"]), box) if box else None}
+                  for p in result["ranked_regions"]]
+    record = {"target_bbox": box, "candidates": candidates,
+              "best_target_iou": max((c["target_iou"] for c in candidates), default=0.0) if box else None}
+    folder.mkdir(exist_ok=True)
+    (folder / "inspection.json").write_text(json.dumps(record, indent=2))
+    (folder / "index.html").write_text('<a href="inspection.json">Candidate boxes and post-hoc IoU</a>')
+    return record
 
 
 def main() -> None:
@@ -104,10 +127,35 @@ def main() -> None:
         help="Top SAM3 boxes drawn for whole-region verification; 0 disables",
     )
     parser.add_argument(
+        "--region-fallback-limit",
+        type=int,
+        default=3,
+        help="Ambiguous regions re-check this many candidates with detail sheets",
+    )
+    parser.add_argument(
+        "--discovery-mode",
+        choices=("off", "sam3_qwen"),
+        default="off",
+        help="Seed the tree from tiled SAM3 candidates reranked by Qwen",
+    )
+    parser.add_argument("--discovery-tiles", type=int, default=3)
+    parser.add_argument("--discovery-candidates", type=int, default=5)
+    parser.add_argument("--discovery-seeds", type=int, default=3)
+    parser.add_argument("--discovery-overlap", type=float, default=0.10)
+    parser.add_argument(
+        "--no-final-answer",
+        action="store_true",
+        help="Skip the post-search Qwen answer from the top-ranked region",
+    )
+    parser.add_argument(
         "--compact-existing",
         action="store_true",
         help="Resize existing display copies without running inference",
     )
+    parser.add_argument("--vlm-backend", choices=("transformers", "vllm"), default="transformers")
+    parser.add_argument("--vlm-model", choices=tuple(VLLM_MODELS), default=QWEN_MODEL)
+    parser.add_argument("--vlm-endpoint", default=DEFAULT_ENDPOINT)
+    parser.add_argument("--lean-artifacts", action="store_true", help="Keep all JSON but only a few key images per question")
     args = parser.parse_args()
     if args.compact_existing:
         for checkpoint in sorted(args.output_dir.glob("*/completion.json")):
@@ -116,8 +164,11 @@ def main() -> None:
         return
     if args.workers < 1:
         parser.error("workers must be positive")
+    if args.vlm_backend == "transformers" and args.vlm_model != QWEN_MODEL:
+        parser.error("the transformers backend only loads " + QWEN_MODEL)
     manifest = sorted(args.data_dir.glob("hrvs_bbox_samples_*.json"))[-1]
     rows = json.loads(manifest.read_text())
+    targets = {r["question_id"]: r.get("target_bbox") for r in rows}
     questions = [
         Question(
             image_id=str(r["image_id"]),
@@ -142,12 +193,37 @@ def main() -> None:
         questions = questions[: args.limit_questions]
     selected_ids = {q["image_id"] for q in questions}
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    provenance = {
+        "dataset_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        "source_sha256": {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in Path("algorithm").rglob("*.py")},
+    }
+    vlm = {"backend": args.vlm_backend, "model": args.vlm_model}
+    if args.vlm_backend == "vllm":
+        vlm.update(revision=VLLM_MODELS[args.vlm_model]["revision"], endpoint=args.vlm_endpoint,
+                   processor=VLLM_MODELS[args.vlm_model]["processor"])
+    else:
+        vlm.update(revision=QWEN_REVISION, processor=VLLM_MODELS[QWEN_MODEL]["processor"])
+    provenance["vlm"] = vlm
+    if args.lean_artifacts:
+        provenance["artifacts"] = "lean"
+    provenance_path = args.output_dir / "provenance.json"
+    if provenance_path.exists() and json.loads(provenance_path.read_text()) != provenance:
+        raise ValueError("Dataset or implementation changed; use a fresh output directory")
+    provenance_path.write_text(json.dumps(provenance, indent=2))
     (args.output_dir / "selection.json").write_text(json.dumps(questions, indent=2))
     settings = default_search_config()
     settings["max_api_calls"] = args.max_api_calls
     settings["max_local_scores"] = args.max_local_scores
     settings["verification_mode"] = args.verification_mode
     settings["region_candidate_limit"] = args.region_candidate_limit
+    settings["region_fallback_limit"] = args.region_fallback_limit
+    settings["discovery_mode"] = args.discovery_mode
+    settings["discovery_tiles"] = args.discovery_tiles
+    settings["discovery_candidates"] = args.discovery_candidates
+    settings["discovery_seeds"] = args.discovery_seeds
+    settings["discovery_overlap"] = args.discovery_overlap
+    settings["answer_question"] = not args.no_final_answer
+    settings["scoring_backend"] += ":pyes"
     settings_path = args.output_dir / "config.json"
     serialized = json.loads(json.dumps(settings))
     if settings_path.exists() and json.loads(settings_path.read_text()) != serialized:
@@ -159,8 +235,12 @@ def main() -> None:
         f"Loading shared models for {len(questions)} questions; workers={args.workers}",
         flush=True,
     )
+    free, total = torch.cuda.mem_get_info()
+    if free < 16 * 1024**3:
+        raise RuntimeError("Need at least 16 GiB free VRAM")
+    torch.cuda.set_per_process_memory_fraction(14 * 1024**3 / total)
     dino, dino_processor = load_dinov3()
-    qwen = load_qwen_scorer()
+    qwen = VllmScorer(args.vlm_model, args.vlm_endpoint) if args.vlm_backend == "vllm" else load_qwen_scorer()
     sam, sam_processor = load_sam3_model()
     gpu_lock = threading.Lock()
 
@@ -187,7 +267,7 @@ def main() -> None:
 
         return call
 
-    for prompt_method in ("rewrite", "resolve"):
+    for prompt_method in ("rewrite", "resolve", "answer"):
         method = getattr(qwen, prompt_method, None)
         if callable(method):
             setattr(score, prompt_method, guarded(method))
@@ -205,6 +285,10 @@ def main() -> None:
             )
 
     setattr(score, "score_candidates", score_candidates)
+    if args.vlm_backend == "vllm":
+        score = qwen
+    else:
+        score.model_id, score.model_revision, score.backend = QWEN_MODEL, QWEN_REVISION, "transformers"
 
     def detect(pixels: NDArray, concept: str) -> list[SAM3Detection]:
         with gpu_lock:
@@ -230,6 +314,8 @@ def main() -> None:
                 if report["query"] == query:
                     compact_gallery(folder)
                     return previous
+        if args.lean_artifacts and shutil.disk_usage(args.output_dir).free < 16 * 1024**3:
+            raise RuntimeError("Stopping lean run to preserve 16 GiB free disk space")
         folder.mkdir(parents=True, exist_ok=True)
         outcome: Outcome = {
             "question_id": question["question_id"],
@@ -248,11 +334,12 @@ def main() -> None:
             result = run_visual_search(
                 image,
                 query,
+                question=question["question"],
                 config=config,
                 local_scorer=score,
                 detector=detect,
                 feature_extractor=features,
-                artifact_dir=folder / "stages",
+                artifact_dir=None if args.lean_artifacts else folder / "stages",
                 progress=lambda message: print(
                     f"{question['question_id']}: {message}", flush=True
                 ),
@@ -260,21 +347,14 @@ def main() -> None:
             outcome["api_calls"] = result["usage"]["api_calls"]
             outcome["cost_usd"] = result["usage"]["reported_cost_usd"]
             outcome["local_score_calls"] = result["usage"].get("local_score_calls", 0)
+            outcome["final_answer"] = result.get("final_answer", {}).get("answer", "")
             outcome["warnings"] = result.get("warnings", [])
-            save_search_result(result, image, folder / "run")
-            inspection = make_inspection(
-                folder / "run",
-                folder / "inspection",
-                data_dir=args.data_dir,
-                image_id=question["image_id"],
-                question_id=question["question_id"],
-            )
-            outcome["top1_iou"] = (
-                inspection["candidates"][0]["target_iou"]
-                if inspection["candidates"]
-                else 0.0
-            )
-            outcome["best_iou"] = inspection["best_target_iou"]
+            save_search_result(result, image, folder / "run", lean=args.lean_artifacts)
+            inspection = inspect_result(result, targets[question["question_id"]], folder / "inspection")
+            outcome["localization_available"] = inspection["target_bbox"] is not None
+            outcome["top1_iou"] = (inspection["candidates"][0]["target_iou"] or 0.0) if inspection["candidates"] else 0.0
+            outcome["best_iou"] = inspection["best_target_iou"] or 0.0
+            outcome["top10_hit"] = any((c["target_iou"] or 0.0) >= 0.5 for c in inspection["candidates"][:10])
             compact_gallery(folder)
             outcome["error"] = result["error"]
             outcome["status"] = "error" if result["error"] else "complete"
@@ -284,6 +364,11 @@ def main() -> None:
         temporary.write_text(json.dumps(outcome, indent=2))
         temporary.replace(checkpoint)
         return outcome
+
+    def tree_link(o: Outcome) -> str:
+        if args.lean_artifacts:
+            return ""
+        return f' | <a href="{html.escape(o["question_id"])}/stages/tree/index.html">Tree and stages</a>'
 
     outcomes: list[Outcome] = []
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
@@ -304,6 +389,15 @@ def main() -> None:
                 top1_iou_at_50=sum(o["top1_iou"] >= 0.5 for o in outcomes),
                 any_iou_at_50=sum(o["best_iou"] >= 0.5 for o in outcomes),
             )
+            summary["localization_evaluated"] = sum(o.get("localization_available", False) for o in outcomes)
+            summary["top10_iou_at_50"] = sum(o.get("top10_hit", False) for o in outcomes)
+            summary["vlm"] = vlm
+            if args.vlm_backend == "vllm":
+                summary["vllm_http_requests"] = qwen.http_requests
+                summary["logical_probability_evals"] = qwen.probability_forwards
+                summary["probability_note"] = "Candidate evaluations; server batching means these are not physical forwards."
+            else:
+                summary["physical_probability_forwards"] = qwen.probability_forwards
             summary["questions_with_recoverable_errors"] = sum(
                 bool(o.get("warnings")) for o in outcomes
             )
@@ -311,7 +405,7 @@ def main() -> None:
             temporary.write_text(json.dumps(summary, indent=2))
             temporary.replace(args.output_dir / "summary.json")
             links = "\n".join(
-                f'<li><a href="{html.escape(o["question_id"])}/inspection/index.html">{html.escape(o["question_id"])}</a> | <a href="{html.escape(o["question_id"])}/stages/tree/index.html">Tree and stages</a>: {o["status"]} {html.escape(o["error"])}</li>'
+                f'<li><a href="{html.escape(o["question_id"])}/inspection/index.html">{html.escape(o["question_id"])}</a>{tree_link(o)}: {o["status"]} {html.escape(o["error"])}</li>'
                 for o in summary["outcomes"]
             )
             (args.output_dir / "index.html").write_text(

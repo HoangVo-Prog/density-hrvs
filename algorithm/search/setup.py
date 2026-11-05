@@ -260,6 +260,7 @@ def prepare_run(request: SearchRequest) -> RunState:
     )
     return RunState(
         query=request.query,
+        question=(request.question or request.query).strip(),
         settings=settings,
         usage=usage,
         source_image=source_image,

@@ -43,6 +43,7 @@ class SearchRequest:
 
     image: NDArray
     query: str
+    question: str | None = None  # Original question; falls back to query.
     config: SearchConfig | None = None
     scorer: Scorer | None = None
     detector: Detector | None = None
@@ -66,6 +67,7 @@ class RunState:
     """All mutable state for one search, replacing hidden closure variables."""
 
     query: str
+    question: str
     settings: SearchConfig
     usage: SearchUsage
     source_image: Image.Image
@@ -78,6 +80,7 @@ class RunState:
     feature_extractor: FeatureExtractor
     detector: Detector
     context: NodeContext = field(default_factory=NodeContext)
+    seed_children: list[ChildRegion] | None = None
     started_at: float = field(default_factory=time.perf_counter)
     score_cache: dict[str, VerifierScore] = field(default_factory=dict)
     detection_cache: dict[int, list[SAM3Detection]] = field(default_factory=dict)
